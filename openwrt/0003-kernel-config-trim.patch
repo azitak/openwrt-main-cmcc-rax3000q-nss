@@ -1,0 +1,43 @@
+From: RAX3000Q NSS project
+Subject: [PATCH] kernel: trim unused built-ins (JFFS2, BPF syscall/JIT)
+
+Memory audit of the live device: the 256 MB board runs with ~31 MiB
+MemAvailable and no swap, so every unused built-in matters.
+
+- JFFS2: the board's overlay is UBIFS and the rootfs is squashfs on
+  ubiblock; nothing mounts JFFS2.  ~200 KiB of code.
+- BPF syscall + JIT: nothing in the image loads eBPF programs (nftables
+  and the NSS qdiscs do not); classic BPF (CONFIG_BPF) stays for socket
+  filters.  ~400-600 KiB of code.
+
+USB and ext4 are not built-in either - they arrived as =m kmods via
+qualcommax's DEFAULT_PACKAGES and are excluded in DEVICE_PACKAGES.
+--- a/target/linux/generic/config-6.18	2026-11-07 02:54:56.846049700 +0800
++++ b/target/linux/generic/config-6.18	2026-11-07 02:54:57.182974500 +0800
+@@ -773,14 +773,14 @@
+ # CONFIG_BOSCH_BNO055_SERIAL is not set
+ # CONFIG_BOUNCE is not set
+ CONFIG_BPF=y
+-CONFIG_BPF_JIT=y
++# CONFIG_BPF_JIT is not set
+ # CONFIG_BPF_JIT_ALWAYS_ON is not set
+-CONFIG_BPF_JIT_DEFAULT_ON=y
++# CONFIG_BPF_JIT_DEFAULT_ON is not set
+ # CONFIG_BPF_LIRC_MODE2 is not set
+ # CONFIG_BPF_LSM is not set
+ # CONFIG_BPF_PRELOAD is not set
+ # CONFIG_BPF_STREAM_PARSER is not set
+-CONFIG_BPF_SYSCALL=y
++# CONFIG_BPF_SYSCALL is not set
+ CONFIG_BPF_UNPRIV_DEFAULT_OFF=y
+ # CONFIG_BPQETHER is not set
+ CONFIG_BQL=y
+@@ -3289,7 +3289,7 @@
+ CONFIG_JFFS2_CMODE_PRIORITY=y
+ # CONFIG_JFFS2_CMODE_SIZE is not set
+ CONFIG_JFFS2_COMPRESSION_OPTIONS=y
+-CONFIG_JFFS2_FS=y
++# CONFIG_JFFS2_FS is not set
+ CONFIG_JFFS2_FS_DEBUG=0
+ # CONFIG_JFFS2_FS_POSIX_ACL is not set
+ # CONFIG_JFFS2_FS_SECURITY is not set

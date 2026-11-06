@@ -1,11 +1,12 @@
 # Shipped by this build.  Upstream main ships a zero-length wireless config and
 # leaves both radios disabled; this one comes up ready to associate.
 #
-# The image carries the FULL wpad (wpad-mbedtls), not wpad-basic-mbedtls.
-# Verified on the device with `hostapd -t`: the basic build accepts the 802.11k
-# RRM keys and the 802.11r FT keys, but rejects `bss_transition` and
-# `wnm_sleep_mode` (802.11v) as "unknown configuration item".  The full build
-# enables WNM, so 11k / 11v / 11r are all compiled in.
+# The image carries the FULL hostapd (hostapd-mbedtls), not the basic build.
+# Verified on the device with `hostapd -t`: the basic build accepts the
+# 802.11k RRM keys and the 802.11r FT keys, but rejects `bss_transition` and
+# `wnm_sleep_mode` (802.11v) as "unknown configuration item".  The full
+# build enables WNM, so 11k / 11v / 11r are all compiled in.  No wpa_supplicant
+# is shipped: this board is AP-only.
 #
 # OPEN NETWORK BY DESIGN (same as the 25.12 build of this board): add a password
 # before using it anywhere that matters, e.g.

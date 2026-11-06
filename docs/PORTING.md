@@ -44,12 +44,17 @@ base：OpenWrt main 2026-10-09（JuliusBairaktaris nss-edma-rework 的 vendor-ns
 `target/linux/qualcommax/image/ipq50xx.mk`
 
 ```make
-DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-cmcc_rax3000q
+DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 \
+	ipq-wifi-cmcc_rax3000q \
+	-wpad-basic-mbedtls -wpad-mbedtls hostapd-mbedtls \
+	-kmod-usb3 -kmod-usb-dwc3 -kmod-usb-dwc3-qcom \
+	-e2fsprogs -kmod-fs-ext4 -losetup
 ```
 
 上游这个设备条目**没有** `DEVICE_PACKAGES` —— 这是官方镜像里没有射频的直接原因
 （没有 `ath11k-firmware-ipq5018-qcn6122`，也没有板级 BDF）。同一文件里
 `cmcc_mr3000d-ci`、`yuncore_ax830` 等都有，只有 `cmcc_rax3000q` 漏了。
+hostapd 相关的取舍见 5c，USB/ext4 负号见 5e。
 
 `target/linux/qualcommax/dts/ipq5018-rax3000q.dts`
 
@@ -133,7 +138,8 @@ CONFIG_NSS_MEM_PROFILE_LOW=y               CONFIG_PACKAGE_ipq-wifi-cmcc_rax3000q
 加上文件存在性、Dosilicon 补丁内容（`DS35Q1GA` / 厂商 ID）、DTS 的
 4-bit ECC / `ubi.mtd=rootfs` / NSS include、caldata 两条规则与偏移、
 11k/v/r 选项、USTC 源、fullcone 默认开启、nssinfo feed 补丁、LuCI 与中文包，
-并显式禁止 `wpad-basic-mbedtls` / `nss-tools` 被选回。完整清单以 `setup.sh` 为准。
+并显式禁止 `wpad-*` / `nss-tools` / USB / ext4 包被选回。
+完整清单以 `setup.sh` 为准。
 
 ## 4. 本地已经验证的
 
@@ -269,6 +275,35 @@ netlink 族（capwap/c2c/edma/reasm/l2tpv2…）各打三行错误；② 退出�
 **代码梳理**：setup.sh 头部注释与校验闸门同步（新增 nssinfo 补丁、fullcone
 默认开启、`uci-defaults/*` 整体 chmod 755）；README / README.en / PORTING /
 workflow release-notes 里"fullcone 默认关闭""尚未编译验证"等过期表述全部更新。
+
+## 5e. 内存瘦身：hostapd 化 / 剔 USB+ext4 / 内核裁剪
+
+真机内存审计（256 MB 物理，Linux 可见 172 MB，MemAvailable 仅 31 MB 且无 swap）
+找出三处可回收的浪费，一次改掉：
+
+1. **wpad → hostapd**：`wpad-mbedtls` 是 hostapd+wpa_supplicant 合体，本板纯 AP，
+   supplicant 常驻却无事可做（约 3 MiB RSS）。换 `hostapd-mbedtls`——它与
+   `wpad-mbedtls` 同为 full-mbedtls 变体、共用 `hostapd-full.config`
+   （`CONFIG_WNM=y` / `CONFIG_IEEE80211R=y`），特性完全一致，只少一个二进制。
+   5c 的 `hostapd -t` 结论沿用。
+2. **剔除 USB + ext4 全家**：`qualcommax/Makefile` 的 `DEFAULT_PACKAGES` 给所有
+   ipq50xx 机型强塞 `kmod-usb3`/`dwc3`/`kmod-fs-ext4`/`e2fsprogs`/`losetup`，
+   本板无 USB 口、rootfs 是 UBIFS。这些 kmod 被 `/etc/modules.d` 自动加载
+   （实测 xhci_hcd + ext4 + jbd2 + dwc3 常驻约 1 MiB），纯浪费。
+   `DEVICE_PACKAGES` 负号排除 + 种子显式 not set + setup.sh forbid 三重闸门。
+   依赖的 xhci/usb-core/usb-roles/jbd2/mbcache 随之消失。
+3. **内核 built-in 裁剪**（`0003-kernel-config-trim.patch`，改 generic config）：
+   - `CONFIG_JFFS2_FS=y` → off：overlay 是 UBIFS、rootfs 是 squashfs，无人挂 JFFS2；
+   - `CONFIG_BPF_SYSCALL` / `CONFIG_BPF_JIT` → off：镜像里没有任何 eBPF 使用者
+     （nftables/NSS qdisc 都不用），classic BPF（`CONFIG_BPF`）保留给 socket filter。
+   合计约省 0.6-0.8 MiB 内核代码。
+   注：USB/ext4 在内核里本来就是 `is not set`（=m 全因 kmod 包拉起），
+   剔包后内核侧无需再动。
+
+预期合计：常驻 RAM 省约 4-5 MiB，flash 省约 3 MiB，manifest 校验
+（build.yml）现在要求 hostapd-mbedtls 在、kmod-usb3/kmod-fs-ext4/e2fsprogs/
+wpad-* 不在。其余内存优化方向（zram、conntrack 调小、NSS/M3 region 压缩）见
+当轮讨论记录，未在本轮实施。
 
 ## 6. 已知风险
 

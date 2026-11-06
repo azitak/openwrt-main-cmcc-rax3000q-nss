@@ -13,7 +13,8 @@
 #
 # This project changes six things:
 #   1. edits to files the baseline already ships  -> openwrt/0NNN-*.patch
-#      (board DTS + image.mk + caldata cases; libnftnl autoreconf for fullcone)
+#      (board DTS + image.mk + caldata cases; libnftnl autoreconf for fullcone;
+#      kernel config trim)
 #   2. files the baseline does not have           -> openwrt/tree/, copied in
 #      (Dosilicon backport, BDF package, SONiC fullcone kernel/userspace patches)
 #   3. patches into the installed feeds           -> openwrt/feeds/, copied after
@@ -64,7 +65,8 @@ fi
 
 # ---------------------------------------------------------------- 1. tracked edits
 # 0001 = board (DTS, image.mk, caldata), 0002 = the libnftnl autoreconf hook
-# the SONiC fullcone patch needs.  More 0NNN- patches are picked up in order.
+# the SONiC fullcone patch needs, 0003 = kernel config trim (JFFS2, BPF).
+# More 0NNN- patches are picked up in order.
 say "Applying edits to baseline files"
 for PATCH in "$HERE"/openwrt/0[0-9][0-9][0-9]-*.patch; do
     [ -f "$PATCH" ] || continue
@@ -350,12 +352,18 @@ check 'CONFIG_PACKAGE_luci=y'
 check 'CONFIG_PACKAGE_luci-theme-argon=y'
 check 'CONFIG_PACKAGE_luci-app-upnp=y'
 check 'CONFIG_PACKAGE_luci-i18n-base-zh-cn=y'
-# full wpad is what enables 802.11v; the basic variant must not come back
-check 'CONFIG_PACKAGE_wpad-mbedtls=y'
+# full hostapd is what enables 802.11v; no wpad at all (AP-only board)
+check 'CONFIG_PACKAGE_hostapd-mbedtls=y'
+forbid 'CONFIG_PACKAGE_wpad-mbedtls=y'
 forbid 'CONFIG_PACKAGE_wpad-basic-mbedtls=y'
 # nss-tools (the ipq807x/ipq60xx variant) is @BROKEN here and conflicts with
 # nss-tools-dwmac.  The luci meta package must not resurrect it.
 forbid 'CONFIG_PACKAGE_nss-tools=y'
+# no USB port and a UBIFS rootfs: the subtarget's DEFAULT_PACKAGES must not
+# drag USB + ext4 back in (they auto-load from /etc/modules.d and cost RAM)
+forbid 'CONFIG_PACKAGE_kmod-usb3=y'
+forbid 'CONFIG_PACKAGE_kmod-fs-ext4=y'
+forbid 'CONFIG_PACKAGE_e2fsprogs=y'
 
 for f in \
   "$OW/target/linux/qualcommax/patches-6.18/0810-mtd-spinand-add-support-for-Dosilicon-DS35Q1GA-DS35M1GA.patch" \

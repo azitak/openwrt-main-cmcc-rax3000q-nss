@@ -103,7 +103,8 @@ CPU 链路：**QCA8337 port0 --SGMII--> gmac1（`eth0`）**。gmac0（内部 GE 
 
 - `target/linux/qualcommax/image/ipq50xx.mk`
   `Device/cmcc_rax3000q` 补上 `DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122
-  ipq-wifi-cmcc_rax3000q -wpad-basic-mbedtls wpad-mbedtls`。
+  ipq-wifi-cmcc_rax3000q -wpad-basic-mbedtls -wpad-mbedtls hostapd-mbedtls
+  -kmod-usb3 -kmod-usb-dwc3 -kmod-usb-dwc3-qcom -e2fsprogs -kmod-fs-ext4 -losetup`。
   **上游这里为空，所以官方镜像没有射频。**
 - `target/linux/qualcommax/dts/ipq5018-rax3000q.dts`
   - `#include "ipq5018-nss.dtsi"` —— 没有这个节点 `qca-nss-drv` 根本不 probe，
@@ -208,8 +209,13 @@ SQM（装进镜像但默认关闭）。默认包还包含：
 - **LuCI**：`luci` 元包、`luci-theme-argon`（第三方，由 `setup.sh` 以本地
   `src-link` feed 提供；bootstrap 仍是默认主题，主题坏了也不会拖垮 Web UI）、`luci-app-upnp` +
   `miniupnpd`、以及 base/firewall/package-manager/upnp 四个简体中文语言包。
-- **完整 wpad**：`wpad-mbedtls`，并在 `DEVICE_PACKAGES` 里用
-  `-wpad-basic-mbedtls` 排除掉默认 basic 变体，为了 802.11v。
+- **完整 hostapd**：`hostapd-mbedtls`（full 变体，含 WNM = 802.11v），并在
+  `DEVICE_PACKAGES` 里排除 `wpad-basic-mbedtls` / `wpad-mbedtls`——本板只有
+  AP 场景，supplicant 那一半纯属闲置（省约 3 MiB 内存）。
+- **剔除 USB / ext4**：qualcommax 的 `DEFAULT_PACKAGES` 会给所有 ipq50xx 机型
+  强塞 `kmod-usb3`/`dwc3`/`kmod-fs-ext4`/`e2fsprogs`/`losetup`；本板没有 USB 口、
+  rootfs 是 UBIFS，这些纯属浪费（还会被 `/etc/modules.d` 自动加载吃内存），
+  已在 `DEVICE_PACKAGES` 里负号排除。
 - **`zram-swap`**：压缩交换分区，默认容量为内存一半（约 124 MiB）。
 - **apk 镜像源**：`CONFIG_VERSION_REPO` 指向中科大 USTC 的 snapshots。
   清华 TUNA 官方说明「本站不包含 snapshots 镜像」，而本固件是 SNAPSHOT，
@@ -225,7 +231,7 @@ SQM（装进镜像但默认关闭）。默认包还包含：
 `setup.sh` 把上面几类装进一棵干净的基线树，并在**编译前**校验：Dosilicon 补丁、
 4-bit ECC、`ubi.mtd=rootfs`、NSS 节点、caldata 规则、fullcone 补丁与中文翻译、
 fullcone 默认开启、nssinfo feed 补丁、USTC 源、11k/v/r 选项，以及全部关键
-kconfig 符号（并显式禁止 `wpad-basic-mbedtls` / `nss-tools` 被选回）。
+kconfig 符号（并显式禁止 `wpad-*` / `nss-tools` / USB / ext4 包被选回）。
 任何一条不满足，几秒内失败，而不是等 90 分钟编译出一个开不了机的镜像。
 
 ---
@@ -304,10 +310,10 @@ uci set wireless.default_radio1.key='至少八位'
 uci commit wireless && wifi reload
 ```
 
-镜像里是**完整版** `wpad-mbedtls`（不是 basic）。这是在真机上用
+镜像里是**完整版** hostapd（`hostapd-mbedtls`，不是 basic）。这是在真机上用
 `hostapd -t` 逐项实测后换的：
 
-| 能力 | `wpad-basic-mbedtls`（首版） | 本版 `wpad-mbedtls` |
+| 能力 | `wpad-basic-mbedtls`（首版） | 本版 `hostapd-mbedtls`（full） |
 |---|---|---|
 | 802.11k RRM | ✅ `rrm_neighbor_report` / `rrm_beacon_report` 接受 | ✅ |
 | 802.11v WNM | ❌ `bss_transition` / `wnm_sleep_mode` 报 `unknown configuration item` | ✅ |
