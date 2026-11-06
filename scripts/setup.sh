@@ -81,26 +81,71 @@ grep -q 'ipq5018-nss.dtsi' "$DTS" || { echo "ERROR: $DTS does not include ipq501
 
 # ---------------------------------------------------------------- 3. feeds
 say "Updating and installing feeds"
-# feeds.conf.default of the baseline already names the nss feed
-# (kuncy7/nss-packages;ipq50xx-rebase).
+# Only three feeds are needed: packages (sqm-scripts, tc), luci, and the nss
+# feed.  routing/telephony/video would be ~60% of the clone for nothing.
+#
+# They are taken from the GitHub mirrors rather than git.openwrt.org: the
+# Actions runners reach github.com directly and git.openwrt.org over a much
+# slower path that occasionally stalls for tens of minutes (observed 2026-11-06:
+# one run spent 100 s here, the next was still cloning after 40 min).  The
+# mirrors carry the same master branch the snapshot is built against.
 FEEDS="$OW/feeds.conf"
-[ -f "$FEEDS" ] || cp "$OW/feeds.conf.default" "$FEEDS"
-grep -q 'nss-packages' "$FEEDS" || {
-    echo "ERROR: $FEEDS has no nss feed line; the NSS packages would not exist" >&2
+NSS_LINE=$(grep -m1 'nss-packages' "$OW/feeds.conf.default" 2>/dev/null || true)
+[ -n "$NSS_LINE" ] || {
+    echo "ERROR: $OW/feeds.conf.default names no nss feed; the NSS packages would not exist" >&2
     exit 1
 }
+cat > "$FEEDS" <<EOF
+src-git packages https://github.com/openwrt/packages.git
+src-git luci https://github.com/openwrt/luci.git
+$NSS_LINE
+EOF
+cat "$FEEDS"
+
+# A stalled clone should give up in a minute, not hold the runner for an hour.
+export GIT_HTTP_LOW_SPEED_LIMIT=1000
+export GIT_HTTP_LOW_SPEED_TIME=60
 feeds_log="$OW/feeds-setup.log"
-if ! ( cd "$OW" && run 1800 ./scripts/feeds update -a ) >"$feeds_log" 2>&1; then
-    echo "ERROR: feeds update failed or timed out. Last 40 lines:"
+: > "$feeds_log"
+
+# tee, not a redirect: this is the one step whose progress is worth watching
+# live, and the file is what the workflow uploads when it fails.
+feeds_update() {
+    ( cd "$OW" && run 1800 ./scripts/feeds update packages luci nss ) 2>&1 | tee -a "$feeds_log"
+    return "${PIPESTATUS[0]}"
+}
+feeds_install() {
+    ( cd "$OW" && run 1800 ./scripts/feeds install -a ) 2>&1 | tee -a "$feeds_log"
+    return "${PIPESTATUS[0]}"
+}
+
+ok=0
+for attempt in 1 2; do
+    # A clone that died mid-way leaves a directory that is not a git checkout.
+    # scripts/feeds then refuses to touch it, and the retry fails the same way.
+    for d in packages luci nss; do
+        if [ -d "$OW/feeds/$d" ] && [ ! -d "$OW/feeds/$d/.git" ]; then
+            echo "WARNING: feeds/$d is not a git checkout, removing it for a clean clone" >&2
+            rm -rf "$OW/feeds/$d"
+        fi
+    done
+    echo "--- feeds update, attempt $attempt"
+    if feeds_update; then ok=1; break; fi
+    echo "WARNING: feeds update attempt $attempt failed; retrying" >&2
+done
+if [ "$ok" != 1 ]; then
+    echo "ERROR: feeds update failed twice. Last 40 lines:"
     tail -40 "$feeds_log"
     exit 1
 fi
-if ! ( cd "$OW" && run 1800 ./scripts/feeds install -a ) >"$feeds_log" 2>&1; then
+
+if ! feeds_install; then
     echo "ERROR: feeds install failed or timed out. Last 40 lines:"
     tail -40 "$feeds_log"
     exit 1
 fi
 echo "feeds updated and installed"
+grep -c 'Installing package' "$feeds_log" | sed 's/^/  packages installed: /' || true
 
 # ---------------------------------------------------------------- 4. config
 if [ -f "$OW/.config" ] && [ "${RESEED:-0}" != 1 ]; then
