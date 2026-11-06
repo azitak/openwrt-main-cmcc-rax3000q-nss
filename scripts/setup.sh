@@ -105,8 +105,11 @@ grep -q 'ipq5018-nss.dtsi' "$DTS" || { echo "ERROR: $DTS does not include ipq501
 
 # ---------------------------------------------------------------- 3. feeds
 say "Updating and installing feeds"
-# Only three feeds are needed: packages (sqm-scripts, tc), luci, and the nss
-# feed.  routing/telephony/video would be ~60% of the clone for nothing.
+# feeds.conf lists exactly four feeds: packages (sqm-scripts, tc), luci, the
+# nss feed, and argon (luci-theme-argon).  routing/telephony/video would be
+# ~60% of the clone for nothing.  feeds update uses -a so that every feed
+# declared below gets an index - a hand-maintained list here once forgot argon
+# and defconfig silently dropped luci-theme-argon.
 #
 # They are taken from the GitHub mirrors rather than git.openwrt.org: the
 # Actions runners reach github.com directly and git.openwrt.org over a much
@@ -139,7 +142,7 @@ feeds_log="$OW/feeds-setup.log"
 # tee, not a redirect: this is the one step whose progress is worth watching
 # live, and the file is what the workflow uploads when it fails.
 feeds_update() {
-    ( cd "$OW" && run 1800 ./scripts/feeds update packages luci nss ) 2>&1 | tee -a "$feeds_log"
+    ( cd "$OW" && run 1800 ./scripts/feeds update -a ) 2>&1 | tee -a "$feeds_log"
     return "${PIPESTATUS[0]}"
 }
 feeds_install() {
@@ -174,6 +177,18 @@ if ! feeds_install; then
 fi
 echo "feeds updated and installed"
 grep -c 'Installing package' "$feeds_log" | sed 's/^/  packages installed: /' || true
+
+# Derive this from feeds.conf, not from a hand-written list: a feed without an
+# index is silently skipped by `feeds install`, and its packages then vanish
+# from .config with no error until the verification stage much later.
+while read -r kind name _rest; do
+    case "$kind" in src-git|src-link|src-svn|src-git-full) ;; *) continue ;; esac
+    [ -f "$OW/feeds/$name.index" ] || {
+        echo "ERROR: feed '$name' has no index after 'feeds update -a'" >&2
+        exit 1
+    }
+    echo "  feed index ok: $name"
+done < <(grep -vE '^[[:space:]]*(#|$)' "$FEEDS")
 
 # The SONiC fullcone LuCI patch belongs to luci-app-firewall, which only exists
 # once the luci feed has been cloned, so it has to be copied now rather than
