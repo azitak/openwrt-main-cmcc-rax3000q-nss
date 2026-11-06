@@ -15,12 +15,17 @@ things upstream does not give you:
    `DEVICE_PACKAGES` (no ath11k firmware, no board BDF) and both wifi nodes are
    `disabled`, because it assumes the 512 MB memory defaults. This is a 256 MB
    board.
-3. **Wired and Wi-Fi forwarding inside the NSS core**, following the NSS port
+3. **Wired forwarding inside the NSS core** (Wi-Fi offload is built but not
+   validated on this board yet), following the NSS port
    of [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss)
    for the same SoC and the same switch.
 
-> **Status: code complete, first CI image still has to be validated on hardware.**
-> Back up every partition before flashing, `0:art` above all.
+> **Status:** the first image was flashed by the user and audited on hardware -
+> Dosilicon NAND, UBI, DSA/WAN, NSS hardware forwarding (ECM counters climbing
+> under real traffic) and LuCI all passed; both radios failed to probe because
+> caldata was missing. caldata, full wpad/11k/v/r, fullcone, the USTC mirror and
+> the LuCI package set were added afterwards and **are not yet build-validated**
+> (CI is manual now). Back up every partition before flashing, `0:art` above all.
 
 ## Why the PZ-L8 recipe cannot be used on main
 
@@ -46,7 +51,7 @@ kmod-qca-dwmac-nss                      TX drained, NAPI off, DMA stopped, ndo_s
         v
 qca-nss-drv + NSS firmware (12.5-210)   UBI32 core takes over forwarding
         v
-qca-nss-ecm                             conntrack -> acceleration rules (DSA port patches 0051-0057)
+qca-nss-ecm                             conntrack -> acceleration rules (qca-dsa-nss firmware VLAN nodes)
 ```
 
 Wiring is untouched: the QCA8337 keeps its DSA driver, and before netifd runs
@@ -63,23 +68,25 @@ DSA port and VLAN a firmware VLAN interface so ECM can write rules for it.
 
 ## What this repository changes
 
-1. `openwrt/0001-cmcc-rax3000q-nss.patch` — two files:
-   `image/ipq50xx.mk` gets `DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122
-   ipq-wifi-cmcc_rax3000q`; the board DTS gets `#include "ipq5018-nss.dtsi"`,
-   `nand-ecc-strength = <4>` (both parts use on-die 4-bit ECC per 512 B; 8 makes
-   what U-Boot wrote unreadable), `ubi.mtd=rootfs`, `coherent_pool=512K`,
-   `&nss_region` at 8 MiB (the vendor MP_256 firmware reserves 8 MiB too), both
-   radios `okay` with `ath11k-fw-memory-mode = <2>`.
-2. `openwrt/tree/` — the Dosilicon driver backport
-   (`patches-6.18/0810-…`, Linux 7.0 driver by Ahmed Naseef / Miquel Raynal) and
-   `package/ipq-wifi-cmcc_rax3000q/` (the board's official BDF, packed into
-   `board-2.bin.{IPQ5018,QCN6122}` with five name variants each).
-3. `config/cmcc_rax3000q.config` — 256M group (`ATH11K_MEM_PROFILE_256M`,
-   `NSS_MEM_PROFILE_LOW`), `nss-tools-dwmac`, Wi-Fi offload, firmware 12.5,
-   SQM (in the image, off by default), LuCI with Chinese (the NSS tree's own
-   images ship without LuCI).
-4. `scripts/setup.sh` + `.github/workflows/build.yml` — apply all of the above
-   to a clean baseline and verify the boot-critical pieces before spending 90
+1. `openwrt/0001-*.patch` + `0002-*.patch` — edits to files the baseline ships:
+   `image/ipq50xx.mk` (`DEVICE_PACKAGES` gains the ath11k firmware, the board
+   BDF, and `-wpad-basic-mbedtls wpad-mbedtls`), the board DTS (NSS include,
+   4-bit ECC, `ubi.mtd=rootfs`, `coherent_pool=512K`, 8 MiB NSS region, both
+   radios `okay` with `ath11k-fw-memory-mode = <2>` and the baseline's single
+   rproc wiring), two `cmcc,rax3000q` caldata cases, and `PKG_FIXUP:=autoreconf`
+   in libnftnl for the fullcone patch.
+2. `openwrt/tree/` — files the baseline lacks: the Dosilicon backport, the
+   board's BDF package, and the SONiC fullcone NAT kernel/userspace patches.
+3. `openwrt/feeds/` — the `luci-app-firewall` fullcone UI patch and zh_Hans
+   strings, installed by `setup.sh` after `feeds install`.
+4. `files/` — the shipped wireless config (11k/11v/11r), the USTC apk mirror,
+   a first-boot repair for kept-config upgrades, and an rc.local that loads
+   `qca-nss-netlink` so `nssinfo` works.
+5. `config/cmcc_rax3000q.config` — 256M group, NSS/ECM + wifili, firmware 12.5,
+   SQM (off by default), full `wpad-mbedtls`, `luci` + argon + UPnP + four
+   zh_Hans i18n packages, and the USTC `VERSION_REPO`.
+6. `scripts/setup.sh` + `.github/workflows/build.yml` — apply all of the above
+   to a clean baseline and verify every boot-critical piece before spending 90
    minutes on a build that would produce an unbootable image.
 
 ## Build
@@ -161,9 +168,11 @@ board's wiring, not the offload.
 ## Known limits
 
 - **Wi-Fi offload is not validated on this board** (the wired path is, on the
-  GL-B3000 — same SoC, same switch). This board's QCN6102 uses mainline's
-  multi-PD idiom (`q6_wcss_pd2`), the validated boards use the single-rproc
-  one. If wifili fails, the radios stay on the host path; routing is unaffected.
+  GL-B3000 — same SoC, same switch). Both radios use the baseline's single
+  rproc + fixed memory regions, which is the idiom validated on the 256 MB
+  boards, but this board's own `boot-args` (PD 2, reset GPIO 27) and BDF have
+  not been exercised on hardware. If wifili fails, the radios stay on the host
+  path; routing is unaffected.
 - sysupgrade follows upstream main (`elecom_upgrade_prepare` group); it has not
   been run on hardware here.
 - kmods not in the image cannot be installed from the official feeds (kernel

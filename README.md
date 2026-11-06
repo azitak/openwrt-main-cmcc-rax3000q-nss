@@ -11,15 +11,17 @@
 2. **两块射频能起来** —— 主线虽然已经支持这块板（`Device/cmcc_rax3000q`），但它的
    `DEVICE_PACKAGES` 是空的，镜像里既没有 ath11k 固件也没有板级 BDF，而且设备树里
    两个 wifi 节点是 `disabled`（上游按 512 MB 的默认值考虑，256 MB 装不下）。
-3. **有线 + Wi-Fi 的转发进 NSS 核** —— 参照
+3. **有线转发进 NSS 核**（Wi-Fi offload 的代码与配置也编进镜像，但**未在本板实测**）—— 参照
    [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss)
    在 PZ-L8（同 SoC、同交换机）上跑通的 NSS 方案，在 main 上落成当前唯一可行的那条路：
    **保留上游 stmmac 驱动，用一小块 glue 模块把 GMAC 的数据面交给 NSS 固件**。
 
-> **状态：代码已完成，首轮 CI 镜像待真机验证。**
-> 与上一代（v25.12.5 基线）已经确认过的事实对齐：闪存是 Dosilicon、ECC 必须 4/512、
-> bootargs 需要 `ubi.mtd=rootfs`。这三条都写进了代码并被 CI 在编译前校验。
-> 刷机前**务必备份全部分区**，尤其是 `0:art`（射频校准数据）。
+> **状态：首版镜像已由用户刷入并做过完整真机检查**——Dosilicon、UBI、DSA/WAN、
+> NSS 硬件加速（ECM 计数随真实流量增长）、LuCI 全部通过；两个射频因缺 caldata 没有
+> probe。此后又补齐了 caldata、full wpad / 11k/v/r、fullcone、USTC 源、LuCI 包，
+> **这些改动尚未编译验证**（CI 已改为手动触发）。
+> 与上一代（v25.12.5 基线）确认过的事实对齐：闪存是 Dosilicon、ECC 必须 4/512、
+> bootargs 需要 `ubi.mtd=rootfs`。刷机前**务必备份全部分区**，尤其是 `0:art`。
 
 ---
 
@@ -52,7 +54,7 @@ kmod-qca-dwmac-nss                          ← glue：TX 排空、NAPI 关、DM
         ▼
 qca-nss-drv + NSS 固件（12.5-210）          ← UBI32 核接管转发
         ▼
-qca-nss-ecm                                 ← 连接跟踪 → 加速规则（DSA 端口补丁 0051–0057）
+qca-nss-ecm                                 ← 连接跟踪 → 加速规则（`qca-dsa-nss` 为 DSA 端口建固件 VLAN 节点）
 ```
 
 数据面之上，交换机的接线方式不变：QCA8337 仍然由 `qca8k` 以 DSA 驱动，NSS 服务在 netifd
@@ -92,24 +94,30 @@ CPU 链路：**QCA8337 port0 --SGMII--> gmac1（`eth0`）**。gmac0（内部 GE 
 
 ## 本仓库改了什么
 
-只有四类，全部可审：
+下面六类，全部可审：
 
-### 1. `openwrt/0001-cmcc-rax3000q-nss.patch`（改基线已有的文件，2 个）
+### 1. `openwrt/0001-*.patch` / `0002-*.patch`（改基线已有的文件）
+
+0001 改 `ipq50xx.mk`、板级 DTS 和 `11-ath11k-caldata` 三个文件；0002 给
+`package/libs/libnftnl/Makefile` 加 `PKG_FIXUP:=autoreconf`（fullcone 补丁需要）。
 
 - `target/linux/qualcommax/image/ipq50xx.mk`
   `Device/cmcc_rax3000q` 补上 `DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122
-  ipq-wifi-cmcc_rax3000q`。**上游这里为空，所以官方镜像没有射频。**
+  ipq-wifi-cmcc_rax3000q -wpad-basic-mbedtls wpad-mbedtls`。
+  **上游这里为空，所以官方镜像没有射频。**
 - `target/linux/qualcommax/dts/ipq5018-rax3000q.dts`
   - `#include "ipq5018-nss.dtsi"` —— 没有这个节点 `qca-nss-drv` 根本不 probe，
     而且**静默**：整条加速链路不工作，系统照常能上网；
   - `nand-ecc-strength = <8>` → **`<4>`**：两颗闪存的片上 ECC 都是 4 bit/512 B，
     用 8 会让 U-Boot 写进 `rootfs` 的数据变成 ECC 错误；
   - `bootargs-append` 增加 `ubi.mtd=rootfs`，把 `coherent_pool` 从 2M 降到 **512K**
-    （256 MB 板型；前提是基线自带的内核补丁 `0828`）；
+    （基线 256 MB 板型的通行做法：旧的 MPD 固件加载器已从内核移除，multi-PD 改由
+    ath11k 处理，不再需要从 atomic DMA pool 取分段缓冲，见 `ipq5018-cr8806.dts` 注释）；
   - `&nss_region` 从 16 MiB 改成 **8 MiB**（原厂 MP_256 固件同样是 8 MiB，
     省回 8 MB `MemTotal`）；
   - `&q6v5_wcss` / `&wifi` / `&wifi1` 全部 `okay`，`ath11k-fw-memory-mode = <2>`
-    （wifili 需要的档位）；两个射频改成基线的**单 rproc + 固定内存区**写法
+    （256 MB 板型进一步缩减固件内存占用的档位，VDEV/peer 数更少）；两个射频改成基线的
+    **单 rproc + 固定内存区**写法
     （上游那份 DTS 用的 `q6_wcss_pd1`/`q6_wcss_pd2` 标签在这棵树里已经不存在，
     直接用会让 `dtc` 报 `phandle_references` 错误，构建在最后一步失败）。
 
@@ -138,7 +146,7 @@ wlan 接口、`/etc/config/wireless` 是 0 字节。补丁给这块板加了两�
 开头就是它自己的 RF 表，改 0x0e–0x13 会让固件在 `phyrf_reset.c` 断言、
 WMI 永远不 ready（上一版 25.12 在真机上踩过）。
 
-`files/` 里的三个文件随镜像进入 rootfs：
+`files/` 里的四个文件随镜像进入 rootfs：
 
 | 文件 | 作用 |
 |---|---|
@@ -199,8 +207,10 @@ SQM（装进镜像但默认关闭）。默认包还包含：
 
 ### 4. `scripts/setup.sh` + `.github/workflows/build.yml`
 
-`setup.sh` 把上面三类装进一棵干净的基线树，并在**编译前**校验：Dosilicon 补丁在、
-4-bit ECC 在、`ubi.mtd=rootfs` 在、NSS 节点在、14 个关键 kconfig 符号都在。
+`setup.sh` 把上面几类装进一棵干净的基线树，并在**编译前**校验：Dosilicon 补丁、
+4-bit ECC、`ubi.mtd=rootfs`、NSS 节点、caldata 规则、fullcone 补丁与中文翻译、
+USTC 源、11k/v/r 选项，以及全部关键 kconfig 符号（并显式禁止
+`wpad-basic-mbedtls` / `nss-tools` 被选回）。
 任何一条不满足，几秒内失败，而不是等 90 分钟编译出一个开不了机的镜像。
 
 ---
@@ -251,7 +261,7 @@ NSS 补丁与 6.18.60 内核绑得很紧，跟着分支头跑容易踩空。
 | 文件 | 用途 |
 |---|---|
 | `*-squashfs-factory.ubi` | 从原厂 U-Boot 走 TFTP 首次刷入 |
-| `*-squashfs-sysupgrade.bin` | 已经在跑 OpenWrt 的机器升级：`sysupgrade -n <file>` |
+| `*-squashfs-sysupgrade.bin` | 已经在跑 OpenWrt 的机器升级：`sysupgrade <file>`（保留配置时首启脚本会修复旧配置） |
 
 原厂 U-Boot（3-pin 串口 115200n8 打断，PC 侧起 TFTP，原厂示例用 192.168.10.19）：
 
@@ -308,11 +318,14 @@ dmesg | grep -i 'spi-nand'
 
 # 2) 加速服务在
 ls /etc/rc.d | grep S19nss
+# 2b) 两个射频都起来了
+iw dev                  # phy0-ap0 / phy1-ap0
+
 # 3) 数据面接管成功
 cat /sys/kernel/debug/qca-dwmac-nss/status
 #   phys_if 1: started dev=eth0 ...
 # 4) 整条平面起来了
-logread -e nss          # 结尾 "NSS wired plane + ECM up (Wi-Fi on the NSS path)"
+logread -e nss          # 结尾 "NSS wired plane + ECM up (Wi-Fi on the NSS|host path)"
 
 # 5) 跑流量再看
 cat /sys/kernel/debug/ecm/ecm_nss_ipv4/tcp_accelerated_count   # > 0
@@ -341,11 +354,13 @@ top                     # 满速转发时 idle > 90%
   `boot-args`，与已验证的 256 MB 板型同构），但 `boot-args` 里的 reset GPIO/PD 组合是这块板
   自己的。若 wifili 起不来，两个射频会留在主机协议栈上
   （ath11k 的握手失败会打日志），路由不受影响。
-- **`ath11k-fw-memory-mode = 2` + 256M 档位**是这套组合里唯一能在 256 MB 里同时装下
-  两个射频和 NSS 的配置；换回 512M 档位会 OOM（上游正是因此在设备树里关掉了 wifi）。
+- **`ath11k-fw-memory-mode = 2` + 256M 档位**：mode 2 会进一步减少固件可创建的
+  VDEV/peer 数量以省内存（补丁 `903`），配合 `ATH11K_MEM_PROFILE_256M` 才能在 256 MB
+  里同时容纳两个射频与 NSS；上游按 512 MB 档位编译，因此把 wifi 关掉了。
 - **sysupgrade 用的是上游 main 的路径**（`cmcc,rax3000q` 与 PZ-L8 同组，
   `elecom_upgrade_prepare` + `nand_do_upgrade`）。上一代项目为了兼容原厂 U-Boot
-  改成过 `CI_UBIPART="rootfs"`；本仓库跟随上游，未在真机上验证过 sysupgrade。
+  改成过 `CI_UBIPART="rootfs"`；本仓库跟随上游。首版镜像已由用户通过 U-Boot TFTP
+  刷入并正常启动，但 **sysupgrade 路径本身仍未在真机上跑过**。
 - 镜像里没有的 kmod（wireguard、tun、USB 存储等）**不能从官方 feed 装**：
   内核不是官方编译的那一个，`apk` 会以 `kernel=...~vermagic` 拒绝。
   要用就在种子配置里加，重新编译。

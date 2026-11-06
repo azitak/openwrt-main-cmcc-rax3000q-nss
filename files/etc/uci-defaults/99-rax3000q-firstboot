@@ -1,15 +1,17 @@
 #!/bin/sh
 # First-boot repair after a sysupgrade with "keep configuration".
 #
-# Two files that the first image of this project got wrong are in OpenWrt's
-# keep.d/base-files-essential, so sysupgrade carries the OLD copies over and
-# they shadow the new ones shipped in the squashfs:
+# Three files can shadow the versions shipped in the squashfs after a
+# kept-config sysupgrade:
 #
-#   /etc/config/wireless  - was 0 bytes in the first image
-#   /etc/rc.local         - had no qca-nss-netlink loader
+#   /etc/config/wireless  - was 0 bytes in the first image (in keep.d)
+#   /etc/rc.local         - had no qca-nss-netlink loader (in keep.d)
+#   apk distfeeds.list    - not in keep.d, but a hand-edited copy would be
+#                           restored from the overlay with the old mirror
 #
-# Fix both here, at the end of uci-defaults (the 99- prefix), so a kept-config
-# upgrade ends up in the same state as a clean factory flash.  This script is
+# Fix all three here, at the end of uci-defaults (the 99- prefix), so a
+# kept-config upgrade ends up in the same state as a clean factory flash.
+# This script is
 # removed by /etc/init.d/boot after it succeeds, and reappears with every new
 # image, so it runs again on the next upgrade.
 . /lib/functions.sh

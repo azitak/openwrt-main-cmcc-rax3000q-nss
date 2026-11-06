@@ -84,7 +84,7 @@ say "Copying files the baseline does not have"
 
 # ------------------------------------------------------------ 2b. rootfs overlay
 # OpenWrt copies the top-level files/ directory verbatim into the image.  It is
-# where the shipped wireless config, its first-boot repair script, and the
+# where the shipped wireless config, apk mirror, first-boot repair script and
 # nss-netlink loader live: none of them belong in the source tree itself.
 if [ -d "$HERE/files" ]; then
     say "Installing the rootfs overlay (files/)"
@@ -270,9 +270,9 @@ check 'CONFIG_PACKAGE_ath11k-firmware-ipq5018-qcn6122=y'
 check 'CONFIG_PACKAGE_ipq-wifi-cmcc_rax3000q=y'
 check 'CONFIG_ATH11K_MEM_PROFILE_256M=y'
 check 'CONFIG_NSS_MEM_PROFILE_LOW=y'
-# tristate M comments the feed's repository line out of /etc/apk/repositories.
-# The nss feed is not published on downloads.openwrt.org, so leaving it at Y
-# makes `apk update` report a missing index on every device.
+# tristate M comments the feed's repository line out of distfeeds.list.
+# The nss feed is local to this project and is on no public OpenWrt mirror,
+# so leaving it at Y makes `apk update` report a missing index on every device.
 check 'CONFIG_FEED_nss=m'
 check 'CONFIG_PACKAGE_kmod-qca-nss-drv-netlink=y'
 # apk mirror: a SNAPSHOT image needs a mirror that carries snapshots/.
@@ -323,7 +323,7 @@ grep -q 'nand-ecc-strength = <4>' "$DTS" ||
 grep -q 'ubi.mtd=rootfs' "$DTS" ||
     { say2file "  MISSING  ubi.mtd=rootfs in $DTS bootargs-append"; missing=1; }
 CAL="$OW/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata"
-n=$(grep -c '^\s*cmcc,rax3000q)' "$CAL" 2>/dev/null || echo 0)
+n=$(grep -c '^[[:space:]]*cmcc,rax3000q)' "$CAL" 2>/dev/null || echo 0)
 [ "$n" = 2 ] ||
     { say2file "  MISSING  rax3000q caldata cases in 11-ath11k-caldata (have $n, need 2)"; missing=1; }
 grep -q 'caldata_extract "0:art" 0x1000 0x20000' "$CAL" ||

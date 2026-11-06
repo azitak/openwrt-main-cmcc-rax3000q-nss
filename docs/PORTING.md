@@ -29,7 +29,7 @@ base：OpenWrt main 2026-10-09（JuliusBairaktaris nss-edma-rework 的 vendor-ns
 |---|---|
 | `kmod-qca-nss-dp`（`dp1`/`dp2` 虚拟网口） | `kmod-qca-dwmac-nss`（在 stmmac 上实现同一套 nss-dp API） |
 | `kmod-qca-ssdk` + `qca-ssdk-shell` + swconfig | `qca8k` DSA + `qca-8021q` tagger；`qca-dsa-nss` 给端口挂固件 VLAN 接口 |
-| `target patches 0960/0961/0963/0966`（ECM 内核钩子） | 基线自带（`0960`/`0961`/`0966` 系列已 rebase 到 6.18）；DSA 端口用 `0051`-`0057` |
+| `target patches 0960/0961/0963/0966`（ECM 内核钩子） | 基线自带（`0960`/`0961`/`0966` 系列已 rebase 到 6.18）；DSA 端口改由 `qca-dsa-nss` 建固件 VLAN 接口 |
 | `0968`-`0971`（qdisc / mcs / bridge-mgr） | qdisc 走 `kmod-qca-nss-drv-qdisc` + `sqm-scripts-nss`；`qca-mcs` 不再需要 |
 | `ipq5018-nss.dtsi`（自建） | 基线自带同名文件，内容按 6.18 的 stmmac 语义重写 |
 | ath11k `990`-`995` 补丁（6.12 的 wifili） | 基线自带的 ath11k NSS 补丁（对应 6.18 backports） |
@@ -58,10 +58,10 @@ DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-cmcc_rax3000q
 | `#include "ipq5018-nss.dtsi"` | 基线 README："**Every** IPQ5018 board DTS in this branch already carries the line … without it there is no `nss@40000000` node, so `qca-nss-drv` never probes and nothing in this branch works - **quietly**" |
 | `nand-ecc-strength` 8 → **4** | 上一版在真机上验证：可启动的 `mxw.ubi` 设备树是 4；Dosilicon/GigaDevice 两颗片的片上 ECC 都是 4 bit/512 B（`NAND_ECCREQ(4, 512)`）；用 8 会让 U-Boot 写入的 UBI 数据 CRC/ECC 报错 |
 | `bootargs-append` 加 `ubi.mtd=rootfs` | 同上，可启动镜像带这个参数；原厂 U-Boot 不保证传，带上更稳 |
-| `coherent_pool` 2M → **512K** | 基线 "256 MB boards" 一节：只有在 patch `0828`（MDT 分段用 `GFP_KERNEL` 分配）之后才安全；2M 实际吃掉 8 MB（三个 2 MiB pool，其中一个会翻倍） |
+| `coherent_pool` 2M → **512K** | 基线 `ipq5018-cr8806.dts` 的注释：旧的 MPD 固件加载器已从内核移除（multi-PD 改由 ath11k 处理），分段缓冲不再从 atomic DMA pool 取；2M 实际吃掉 8 MB（三个 2 MiB pool，其中一个会翻倍） |
 | `&nss_region` 16 MiB → **8 MiB** | 基线 "256 MB boards"：原厂 MP_256 固件同样只留 8 MiB；驱动把这里的大小当 `heap_ddr_size` 上报，8 MiB 足够满速 |
 | `&q6v5_wcss` / `&wifi` / `&wifi1` → `okay` | 上游把三个节点关掉的原因是 "256M RAM is too small for ath11k"，而它按 512 MB 档位编译。本仓库用 `ATH11K_MEM_PROFILE_256M` + `NSS_MEM_PROFILE_LOW`，这条路在 EX511 v2 / Cudy P5 / AX3000T v2 / RG-MA3063 上验证过（RG-MA3063 同样是 IPQ5018 + QCA8337 + QCN6122） |
-| `ath11k-fw-memory-mode` 1 → **2** | 基线：wifili 在 QCN6122 上需要 mode 2；256 MB 板型两个射频都用 2 |
+| `ath11k-fw-memory-mode` 1 → **2** | 补丁 `903`：mode 2 进一步减少固件可创建的 VDEV/peer 数量以省内存（mode 1 = 8 VDEV / 128 peers）；基线 256 MB 板型与 wifili 组合使用 mode 2，官方 main 多数 ipq50xx 机型用 mode 1 |
 | `q6_wcss_pd1/pd2` → **`q6v5_wcss` + memory-region** | 基线把 IPQ5018 的 Q6 改成了单 rproc，PD 通过 `boot-args` 选，每个 PD 一个 `no-map` 区；上游那份 DTS 的多 PD 标签已经不存在，`dtc` 会报 `phandle_references: Reference to non-existent node or label "q6_wcss_pd1"`。改成 EX511 v2 / AX3000T v2 那套：新增 `q6_region_qcn6122_1`（0x4d200000, 13 MiB）与 `m3_dump_qcn6122_1`（0x4df00000, 1 MiB），`wifi1` 用 `memory-region`/`memory-region-names`，去掉 `bdf-addr`/`m3-dump-addr` |
 
 **没有改的**：`&gmac1`（sgmii → QCA8337 port0）、`&mdio1` 的四个 PHY 与
@@ -178,12 +178,14 @@ URL（`CONFIG_FEED_nss=m` 修）；`nssinfo` 全组 `-22` 是 `qca-nss-netlink.k
 
 ## 5b. 第二轮（本轮）改动与待确认
 
-- caldata 两条 raw-extract 规则、`files/` 三个文件、`CONFIG_FEED_nss=m`、
+- caldata 两条 raw-extract 规则、`files/` 四个文件、`CONFIG_FEED_nss=m`、
   `check-dts-labels.py` 早期闸门；修复清单见 README 第 2b 节。
 - 仍需真机确认：两个射频 probe 出 `phy0`/`phy1` 并能关联、wifili 是否真的
   把无线流量送进 NSS（`logread -e nss` 的 "Wi-Fi on the NSS path"）、
   `apk update` 干净、`nssinfo` 不再报 `-22`、sysupgrade 保留配置后
   `99-rax3000q-firstboot` 能从 `/rom` 恢复无线配置、补回 rc.local 的 netlink 加载行。
+  5c 又追加了 fullcone / USTC 源 / LuCI 包 / 11k/v/r，这些连同上面的项目
+  **在下文记录的手动构建之前都还没有编译或真机验证**。
 
 ## 5c. 第三轮：apk 源 / 默认包 / fullcone / 11k/v/r
 

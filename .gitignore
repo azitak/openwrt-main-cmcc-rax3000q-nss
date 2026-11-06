@@ -17,3 +17,5 @@ release-notes.md
 /.config.ci
 /.last-run
 /.ipq5018-upstream.dtsi
+
+/prep.zip

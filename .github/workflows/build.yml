@@ -35,8 +35,8 @@ env:
   # c3po-tag-8021q, 2026-11-05: OpenWrt main 2026-10-09 + NSS on kernel 6.18.60
   BASE_SHA: fb7e09acfea17c435338d9b631cbd33fc39c3c62
   BASE_BRANCH: c3po-tag-8021q
-  # A preparation-only run exists to check .config in ~15 minutes instead of
-  # discovering a dropped symbol after a 90-minute build.
+  # A preparation-only run checks the tree and .config in ~5 minutes instead
+  # of discovering a dropped symbol after a 90-minute build.
   PREPARE_ONLY: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.prepare_only) || 'false' }}
   TZ: Asia/Shanghai
 
@@ -102,10 +102,10 @@ jobs:
             echo "::warning::base tree is not the pinned commit $BASE_SHA"
 
       - name: Prepare the tree
-        # setup.sh applies the board patch, installs the Dosilicon backport and
-        # the BDF package, runs the feeds, seeds .config and verifies every
-        # boot- and offload-critical symbol. It fails in seconds, not after a
-        # 90-minute build.
+        # setup.sh applies the two source patches, installs the Dosilicon
+        # backport / BDF / fullcone patches, seeds the rootfs overlay, wires the
+        # extra feeds, seeds .config and verifies every boot-critical symbol
+        # and file. It fails in minutes, not after a 90-minute build.
         run: bash -x rax3000q/scripts/setup.sh "$GITHUB_WORKSPACE/openwrt"
 
       - name: Verify boot-critical board support
@@ -254,10 +254,12 @@ jobs:
           {
             echo "OpenWrt **main** with Qualcomm **NSS** offload for the **CMCC RAX3000Q / RAX3000-QY**."
             echo
-            echo "Both radios (IPQ5018 2.4 GHz + QCN6102 5 GHz) and the wired path are offloaded into the"
-            echo "NSS core of the SoC; the switch keeps its DSA driver and is spoken to in plain 802.1Q"
-            echo "(\`qca-8021q\` tagger), so \`lan1\`-\`lan3\` and \`wan\` stay the interfaces they are on a"
-            echo "stock image. Kernel 6.18, built for 256 MB (ath11k 256M + NSS LOW)."
+            echo "The wired path is offloaded into the NSS core of the SoC; Wi-Fi offload (wifili) is"
+            echo "built into the image but NOT validated on this board yet. The switch keeps its DSA"
+            echo "driver and is spoken to in plain 802.1Q (\`qca-8021q\` tagger), so \`lan1\`-\`lan3\`"
+            echo "and \`wan\` stay the interfaces they are on a stock image. Kernel 6.18, built for"
+            echo "256 MB (ath11k 256M + NSS LOW). Fullcone NAT and LuCI/Argon/UPnP are included;"
+            echo "fullcone is off by default."
             echo
             echo "This image also carries the **Dosilicon DS35Q1GA / DS35M1GA** SPI-NAND driver, which"
             echo "mainline 6.18 lacks: without it the board cannot mount its root filesystem at all."
@@ -265,16 +267,18 @@ jobs:
             echo "| file | use |"
             echo "|---|---|"
             echo "| \`*-squashfs-factory.ubi\` | first flash from the vendor U-Boot over TFTP: \`tftpboot <pc>:<file>.ubi\` then \`flash rootfs\` |"
-            echo "| \`*-squashfs-sysupgrade.bin\` | upgrade a router already running OpenWrt: \`sysupgrade -n <file>\` |"
+            echo "| \`*-squashfs-sysupgrade.bin\` | upgrade a router already running OpenWrt: \`sysupgrade <file>\` (kept configs are repaired on first boot) |"
             echo
-            echo "Default LAN address is **192.168.1.1**. Both radios probe (\`phy0\`/\`phy1\`), but"
-            echo "\`/etc/config/wireless\` keeps upstream main's default (\`disabled 1\`): enable them"
-            echo "and set an SSID and key in LuCI -> Network -> Wireless."
+            echo "Default LAN address is **192.168.1.1**. Both radios come up enabled as"
+            echo "\`RAX3000Q-2G\` / \`RAX3000Q-5G\`, **open with no password** - set a key in"
+            echo "LuCI -> Network -> Wireless before using it anywhere that matters. 802.11k/v"
+            echo "are active on the open network; 802.11r becomes active once a key is set."
             echo
             echo "### First boot, what to check"
             echo
             echo '```'
             echo 'dmesg | grep -i "spi-nand"        # "Dosilicon SPI NAND was found. 128 MiB"'
+            echo 'iw dev                            # phy0-ap0 / phy1-ap0, both radios up'
             echo 'ls /etc/rc.d | grep S19nss          # the arming service is installed'
             echo 'cat /sys/kernel/debug/qca-dwmac-nss/status   # phys_if 1: started dev=eth0'
             echo 'logread -e nss                      # "NSS wired plane + ECM up"'
