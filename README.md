@@ -16,10 +16,10 @@
    在 PZ-L8（同 SoC、同交换机）上跑通的 NSS 方案，在 main 上落成当前唯一可行的那条路：
    **保留上游 stmmac 驱动，用一小块 glue 模块把 GMAC 的数据面交给 NSS 固件**。
 
-> **状态：首版镜像已由用户刷入并做过完整真机检查**——Dosilicon、UBI、DSA/WAN、
-> NSS 硬件加速（ECM 计数随真实流量增长）、LuCI 全部通过；两个射频因缺 caldata 没有
-> probe。此后又补齐了 caldata、full wpad / 11k/v/r、fullcone、USTC 源、LuCI 包，
-> **这些改动尚未编译验证**（CI 已改为手动触发）。
+> **状态：镜像已在真机完整验证**——Dosilicon、UBI、DSA/WAN、NSS 硬件加速（ECM 计数随
+> 真实流量增长）、双射频（5G HE160 关联成功）、11k/v/r、LuCI/Argon、USTC apk 源全部通过。
+> 最新一轮改动：fullcone NAT 改为**默认开启**（已在真机确认与 NSS/ECM 共存正常）、
+> nssinfo 修复（不再对内核没编的 netlink 族报错，退出不再 SIGABRT）。
 > 与上一代（v25.12.5 基线）确认过的事实对齐：闪存是 Dosilicon、ECC 必须 4/512、
 > bootargs 需要 `ubi.mtd=rootfs`。刷机前**务必备份全部分区**，尤其是 `0:art`。
 
@@ -146,7 +146,7 @@ wlan 接口、`/etc/config/wireless` 是 0 字节。补丁给这块板加了两�
 开头就是它自己的 RF 表，改 0x0e–0x13 会让固件在 `phyrf_reset.c` 断言、
 WMI 永远不 ready（上一版 25.12 在真机上踩过）。
 
-`files/` 里的四个文件随镜像进入 rootfs：
+`files/` 里的五个文件随镜像进入 rootfs：
 
 | 文件 | 作用 |
 |---|---|
@@ -154,6 +154,7 @@ WMI 永远不 ready（上一版 25.12 在真机上踩过）。
 | `etc/apk/repositories.d/distfeeds.list` | 覆盖构建时生成的源列表，指向中科大 USTC 镜像 |
 | `etc/uci-defaults/99-rax3000q-firstboot` | 从首版镜像**保留配置** sysupgrade 时，`/etc/config/wireless`（0 字节）和 `/etc/rc.local` 都在 `keep.d/base-files-essential` 里，会被旧版盖住新文件；脚本从 `/rom` 恢复无线配置、按运行时 sysfs 校正 radio path，并补回 rc.local 里的 netlink 加载行 |
 | `etc/rc.local` | 开机末段 `modprobe qca-nss-netlink`。这个 kmod 故意没有 `AUTOLOAD`（放 `/etc/modules.d` 会让 kmodloader 在 NSS 服务 arm 端口之前把 `qca-nss-drv` 拉起来）；不加载它 `nssinfo` 的每个 netlink mcast group 都报 `-22`，而数据面转发本身完全正常 |
+| `etc/uci-defaults/16-rax3000q-fullcone` | 打开 fullcone 总开关和所有 masq zone 的 fullcone（见 2c）；uci-defaults 每次刷机后重新执行，关掉的用户会在下次升级时恢复默认 |
 
 ### 2c. SONiC fullcone NAT（`openwrt/tree/` 的内核与用户态补丁）
 
@@ -171,19 +172,32 @@ WMI 永远不 ready（上一版 25.12 在真机上踩过）。
 | `package/network/config/firewall4/patches` | fw4 生成 `fullcone` 规则、读 `defaults.fullcone` 总开关与 zone 级开关 |
 | `openwrt/feeds/luci-app-firewall/` | LuCI 原生防火墙页面的 Fullcone 复选框 + 中文翻译，由 `setup.sh` 在 `feeds install` 之后装进 luci feed |
 
-**默认关闭**（`firewall.@defaults[0].fullcone=0`），所以不影响 NSS/ECM 硬件加速。
-启用：
+**默认开启**：`files/etc/uci-defaults/16-rax3000q-fullcone` 在每次刷机后设置
+`firewall.@defaults[0].fullcone='1'` 并给所有 masq zone 开 `fullcone`。已在真机
+确认与 NSS/ECM 共存正常（规则生成、WAN 连通、ECM 连接计数都正常）。关闭：
 
 ```sh
-uci set firewall.@defaults[0].fullcone='1'
-uci set firewall.@zone[1].fullcone='1'      # wan
+uci set firewall.@defaults[0].fullcone='0'
+uci set firewall.@zone[1].fullcone='0'
 uci commit firewall && /etc/init.d/firewall restart
-nft list ruleset | grep fullcone
+nft list ruleset | grep fullcone     # 应为空
 ```
 
-⚠️ NSS/ECM 会把已建立连接交给固件转发，绕过后续 conntrack 处理；本板**未实测**
-二者同时开启时的 EIM/EIF 行为。要验证 fullcone 效果，建议先
-`uci set nss.general.enabled='0'; uci commit nss; reboot`，测完再打开。
+⚠️ NSS/ECM 会把已建立连接交给固件转发，绕过后续 conntrack 处理；fullcone 的
+EIM/EIF 深度行为（长时间大流量下的端口映射稳定性）未做专项测试，介意可按上面关闭。
+
+### 2d. nssinfo feed 补丁（`openwrt/feeds/nss-userspace-oss/`）
+
+`nss-userspace-oss` 源码里 nssinfo 的问题（`0040-*.patch` 修复，由 `setup.sh`
+在 `feeds install` 之后装进 nss feed）：
+
+1. **报错噪音**：nssinfo 无条件订阅所有 NSS netlink 族的 mcast 组，而本内核
+   只编了一部分（capwap / c2c / edma / reasm / l2tpv2 等都没有），每个缺失的族
+   都要打三行错误。补丁把"组不存在"从 `-EINVAL` 报错改为静默 `-ENOENT`，
+   nssinfo 直接跳过这些族。
+2. **退出即崩溃**：`nssinfo_deinit()` 先关 socket 再跑各子系统 deinit，后者对已
+   关闭的 socket 调 `nss_nlsock_leave_grp()`，触发 `ref_cnt` 断言 → 每次退出
+   SIGABRT。补丁把关 socket 挪到 deinit 之后。
 
 ### 3. `config/cmcc_rax3000q.config`（kconfig 种子）
 
@@ -209,8 +223,8 @@ SQM（装进镜像但默认关闭）。默认包还包含：
 
 `setup.sh` 把上面几类装进一棵干净的基线树，并在**编译前**校验：Dosilicon 补丁、
 4-bit ECC、`ubi.mtd=rootfs`、NSS 节点、caldata 规则、fullcone 补丁与中文翻译、
-USTC 源、11k/v/r 选项，以及全部关键 kconfig 符号（并显式禁止
-`wpad-basic-mbedtls` / `nss-tools` 被选回）。
+fullcone 默认开启、nssinfo feed 补丁、USTC 源、11k/v/r 选项，以及全部关键
+kconfig 符号（并显式禁止 `wpad-basic-mbedtls` / `nss-tools` 被选回）。
 任何一条不满足，几秒内失败，而不是等 90 分钟编译出一个开不了机的镜像。
 
 ---

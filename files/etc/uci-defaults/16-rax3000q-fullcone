@@ -1,0 +1,24 @@
+#!/bin/sh
+# Enable SONiC fullcone NAT by default: the global gate plus every zone
+# that masquerades (the wan zone).
+#
+# firewall4 (patched by this project) reads defaults.fullcone as the global
+# gate and zone.fullcone as the per-zone switch; both must be on.  If the
+# kernel lacks the fullcone expression, fw4 turns the gate off by itself
+# with a warning, so this can never break the ruleset.
+#
+# uci-defaults run once per image (also after a keep-config sysupgrade),
+# which is the intended "factory default" behaviour: a user who turns
+# fullcone off gets it back on the next firmware upgrade.
+uci -q set firewall.@defaults[0].fullcone='1'
+
+i=0
+while uci -q get "firewall.@zone[$i]" >/dev/null; do
+    if [ "$(uci -q get "firewall.@zone[$i].masq")" = "1" ]; then
+        uci -q set "firewall.@zone[$i].fullcone='1'"
+    fi
+    i=$((i + 1))
+done
+uci -q commit firewall
+
+exit 0

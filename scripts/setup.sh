@@ -17,7 +17,8 @@
 #   2. files the baseline does not have           -> openwrt/tree/, copied in
 #      (Dosilicon backport, BDF package, SONiC fullcone kernel/userspace patches)
 #   3. patches into the installed feeds           -> openwrt/feeds/, copied after
-#      `feeds install` (luci-app-firewall fullcone UI + zh_Hans strings)
+#      `feeds install` (luci-app-firewall fullcone UI + zh_Hans strings;
+#      nssinfo tolerant of subsystems the kernel did not build)
 #   4. the rootfs overlay                        -> files/, copied into the
 #      build tree's own files/ (wireless, apk mirror, first-boot repair, rc.local)
 #   5. the .config seed                           -> config/
@@ -94,7 +95,7 @@ if [ -d "$HERE/files" ]; then
           install -Dm644 "$f" "$OW/files/${f#./}"
           echo "  files/${f#./}"
       done )
-    chmod 755 "$OW/files/etc/rc.local" "$OW"/files/etc/uci-defaults/99-rax3000q-firstboot
+    chmod 755 "$OW/files/etc/rc.local" "$OW"/files/etc/uci-defaults/*
 fi
 
 # The board DTS must exist and must carry the NSS include: without the node
@@ -247,6 +248,23 @@ else
     exit 1
 fi
 
+# Same story for the nssinfo fix: the patch belongs to the nss feed package
+# nss-userspace-oss, which only exists after the nss feed has been cloned.
+# It makes nssinfo skip netlink subsystems the kernel did not register and
+# fixes the SIGABRT on exit (see the patch header for details).
+NSSUSR="$OW/feeds/nss/nss-userspace-oss"
+if [ -d "$NSSUSR" ]; then
+    say "Installing the nssinfo feed patch"
+    install -dm755 "$NSSUSR/patches"
+    for p in "$HERE"/openwrt/feeds/nss-userspace-oss/patches/*.patch; do
+        [ -f "$p" ] && install -m644 "$p" "$NSSUSR/patches/$(basename "$p")"
+    done
+    echo "  nssinfo patch installed"
+else
+    echo "ERROR: $NSSUSR missing after feeds install; nssinfo fix unavailable" >&2
+    exit 1
+fi
+
 # ---------------------------------------------------------------- 4. config
 if [ -f "$OW/.config" ] && [ "${RESEED:-0}" != 1 ]; then
     say "Keeping the existing .config  (RESEED=1 to replace it with the seed)"
@@ -344,6 +362,7 @@ for f in \
   "$OW/package/ipq-wifi-cmcc_rax3000q/Makefile" \
   "$OW/files/etc/config/wireless" \
   "$OW/files/etc/uci-defaults/99-rax3000q-firstboot" \
+  "$OW/files/etc/uci-defaults/16-rax3000q-fullcone" \
   "$OW/files/etc/rc.local" \
   "$OW/target/linux/generic/hack-6.18/984-add-sonic-fullcone-support.patch" \
   "$OW/target/linux/generic/hack-6.18/987-sonic-fullcone-fix-races-and-drops.patch" \
@@ -390,6 +409,10 @@ grep -q '^PKG_FIXUP:=autoreconf' "$OW/package/libs/libnftnl/Makefile" ||
     { say2file "  MISSING  PKG_FIXUP:=autoreconf in libnftnl (fullcone patch needs it)"; missing=1; }
 grep -q '^# BEGIN openwrt-sonic-fullcone' "$OW/feeds/luci/applications/luci-app-firewall/po/zh_Hans/firewall.po" ||
     { say2file "  MISSING  fullcone zh_Hans strings in luci-app-firewall"; missing=1; }
+grep -q "fullcone='1'" "$OW/files/etc/uci-defaults/16-rax3000q-fullcone" ||
+    { say2file "  MISSING  fullcone enable in 16-rax3000q-fullcone"; missing=1; }
+grep -q 'return -ENOENT' "$OW/feeds/nss/nss-userspace-oss/patches/0040-nssinfo-tolerate-missing-nl-subsystems.patch" ||
+    { say2file "  MISSING  nssinfo -ENOENT fix in the nss feed patch"; missing=1; }
 DIST="$OW/files/etc/apk/repositories.d/distfeeds.list"
 grep -q 'mirrors.ustc.edu.cn/openwrt/snapshots' "$DIST" ||
     { say2file "  MISSING  USTC mirror in $DIST"; missing=1; }

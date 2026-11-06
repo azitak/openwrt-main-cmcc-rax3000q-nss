@@ -1,0 +1,153 @@
+From: RAX3000Q NSS project
+Subject: [PATCH] nssinfo: tolerate netlink subsystems the kernel did not build
+
+nssinfo subscribes to the multicast group of every NSS netlink subsystem
+unconditionally.  On an ipq50xx build most of those families (capwap,
+c2c, edma, reasm, l2tpv2, ...) are not registered by the kernel, so every
+start spills two error lines and an "init failed" per missing family, and
+nssinfo looks broken although it works.
+
+Two changes:
+
+1. nss_nlsock_join_grp()/nss_nlsock_leave_grp() return -ENOENT instead
+   of -EINVAL (and without an error line) when genl_ctrl_resolve_grp()
+   cannot resolve the group: the family simply is not registered, which
+   is an absence, not a failure.  The mcast wrappers and nssinfo skip
+   such subsystems quietly.
+
+2. nssinfo_deinit() closed the netlink socket before running the
+   subsystem deinits, which still call nss_nlsock_leave_grp() on the
+   closed socket and trip its ref_cnt assertion - nssinfo aborted with
+   SIGABRT on every exit.  Close the socket after the deinits instead.
+
+--- a/lib/nss_nlsock.c	2026-11-07 01:19:52.367046100 +0800
++++ b/lib/nss_nlsock.c	2026-11-07 01:20:13.693607600 +0800
+@@ -18,6 +18,7 @@
+  * @file netlink socket handler
+  */
+ 
++#include <errno.h>
+ #include <nss_nlbase.h>
+ #include <nss_nlsock_api.h>
+ 
+@@ -228,8 +229,12 @@
+ 	 */
+ 	sock->grp_id = genl_ctrl_resolve_grp(sock->nl_sk, sock->family_name, grp_name);
+ 	if (sock->grp_id < 0) {
+-		nss_nlsock_log_error("failed to resolve group(%s)\n", grp_name);
+-		return -EINVAL;
++		/*
++		 * The group is not registered by the kernel: the module that
++		 * owns this family was not built, so there is nothing to
++		 * leave.  Report the absence, not an error.
++		 */
++		return -ENOENT;
+ 	}
+ 
+ 	/*
+@@ -259,8 +264,12 @@
+ 	 */
+ 	sock->grp_id = genl_ctrl_resolve_grp(sock->nl_sk, sock->family_name, grp_name);
+ 	if (sock->grp_id < 0) {
+-		nss_nlsock_log_error("failed to resolve group(%s)\n", grp_name);
+-		return -EINVAL;
++		/*
++		 * The group is not registered by the kernel: the module that
++		 * owns this family was not built.  Tell the caller so it can
++		 * skip the subsystem instead of reporting an error.
++		 */
++		return -ENOENT;
+ 	}
+ 
+ 	/*
+--- a/lib/nss_nlmcast_api.c	2026-11-07 01:19:52.412562300 +0800
++++ b/lib/nss_nlmcast_api.c	2026-11-07 01:20:13.694612000 +0800
+@@ -14,6 +14,7 @@
+  **************************************************************************
+  */
+ 
++#include <errno.h>
+ #include <nss_nlbase.h>
+ #include <nss_nlsock_api.h>
+ #include <nss_nlmcast_api.h>
+@@ -93,6 +94,13 @@
+ 	}
+ 
+ 	error = nss_nlsock_join_grp(&ctx->sock, grp_name);
++	if (error == -ENOENT) {
++		/*
++		 * Group not registered by the kernel (module not built):
++		 * nothing to subscribe to, and not worth an error line.
++		 */
++		return error;
++	}
+ 	if (error) {
+ 		nss_nlsock_log_error("Unable to subscribe for mcast group, error(%d)\n", error);
+ 		return error;
+@@ -115,6 +123,13 @@
+ 	}
+ 
+ 	error = nss_nlsock_leave_grp(&ctx->sock, grp_name);
++	if (error == -ENOENT) {
++		/*
++		 * Group not registered by the kernel (module not built):
++		 * nothing to unsubscribe from, and not worth an error line.
++		 */
++		return error;
++	}
+ 	if (error) {
+ 		nss_nlsock_log_error("Unable to unsubscribe for mcast group, error(%d)\n", error);
+ 		return error;
+--- a/nssinfo/src/nssinfo.c	2026-11-07 01:19:52.459097700 +0800
++++ b/nssinfo/src/nssinfo.c	2026-11-07 01:20:13.695611800 +0800
+@@ -17,6 +17,7 @@
+ /*
+  * @file NSSINFO handler
+  */
++#include <errno.h>
+ #include <signal.h>
+ #include "nssinfo.h"
+ 
+@@ -622,11 +623,6 @@
+ 	nssinfo_deinit_t deinit;
+ 
+ 	/*
+-	 * Close NL socket and terminate ctx->sock.thread
+-	 */
+-	nss_nlmcast_sock_close(ctx);
+-
+-	/*
+ 	 * Release memory used for storing stats
+ 	 */
+ 	for (core = 0; core < NSS_MAX_CORES; ++core) {
+@@ -648,6 +644,15 @@
+ 			deinit(ctx);
+ 		}
+ 	}
++
++	/*
++	 * Close NL socket and terminate ctx->sock.thread.  This must happen
++	 * after the subsystem deinits above: they still use the socket to
++	 * leave their multicast groups, and a socket that is already closed
++	 * trips the ref_cnt assertion in nss_nlsock_leave_grp(), aborting
++	 * nssinfo with SIGABRT on every exit.
++	 */
++	nss_nlmcast_sock_close(ctx);
+ }
+ 
+ /*
+@@ -678,6 +683,14 @@
+ 		init = nssinfo_subsystem_array[i].init;
+ 		if (init) {
+ 			error = init(&ctx);
++			if (error == -ENOENT) {
++				/*
++				 * The kernel does not register this family: the
++				 * module that owns it was not built.  Skip the
++				 * subsystem instead of spilling errors.
++				 */
++				continue;
++			}
+ 			if (error) {
+ 				nssinfo_error("%s init failed, error(%d)\n", nssinfo_subsystem_array[i].subsystem_name, error);
+ 			}

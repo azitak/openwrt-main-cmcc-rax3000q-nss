@@ -20,12 +20,13 @@ things upstream does not give you:
    of [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss)
    for the same SoC and the same switch.
 
-> **Status:** the first image was flashed by the user and audited on hardware -
-> Dosilicon NAND, UBI, DSA/WAN, NSS hardware forwarding (ECM counters climbing
-> under real traffic) and LuCI all passed; both radios failed to probe because
-> caldata was missing. caldata, full wpad/11k/v/r, fullcone, the USTC mirror and
-> the LuCI package set were added afterwards and **are not yet build-validated**
-> (CI is manual now). Back up every partition before flashing, `0:art` above all.
+> **Status:** validated on hardware — Dosilicon NAND, UBI, DSA/WAN, NSS hardware
+> forwarding (ECM counters climbing under real traffic), both radios (5 GHz HE160
+> association), 11k/v/r, LuCI/Argon and the USTC mirror all passed. The latest
+> round turns fullcone NAT ON by default (coexistence with NSS/ECM verified on
+> the device) and fixes nssinfo (no more errors for families the kernel did not
+> build, no more SIGABRT on exit). Back up every partition before flashing,
+> `0:art` above all.
 
 ## Why the PZ-L8 recipe cannot be used on main
 
@@ -78,10 +79,13 @@ DSA port and VLAN a firmware VLAN interface so ECM can write rules for it.
 2. `openwrt/tree/` — files the baseline lacks: the Dosilicon backport, the
    board's BDF package, and the SONiC fullcone NAT kernel/userspace patches.
 3. `openwrt/feeds/` — the `luci-app-firewall` fullcone UI patch and zh_Hans
-   strings, installed by `setup.sh` after `feeds install`.
+   strings, plus the `nss-userspace-oss` nssinfo fix (skip netlink families the
+   kernel did not register; no SIGABRT on exit), both installed by `setup.sh`
+   after `feeds install`.
 4. `files/` — the shipped wireless config (11k/11v/11r), the USTC apk mirror,
-   a first-boot repair for kept-config upgrades, and an rc.local that loads
-   `qca-nss-netlink` so `nssinfo` works.
+   a first-boot repair for kept-config upgrades, a uci-defaults script that
+   enables fullcone NAT, and an rc.local that loads `qca-nss-netlink` so
+   `nssinfo` works.
 5. `config/cmcc_rax3000q.config` — 256M group, NSS/ECM + wifili, firmware 12.5,
    SQM (off by default), full `wpad-mbedtls`, `luci` + argon + UPnP + four
    zh_Hans i18n packages, and the USTC `VERSION_REPO`.
@@ -129,12 +133,16 @@ the image; bootstrap stays the default theme.
 
 **SONiC fullcone NAT**: the kernel/fw4/libnftnl/nftables/LuCI patches from
 `mufeng05/openwrt-sonic-fullcone` are built in (6.18 supported, verified to
-apply cleanly against Linux 6.18). It is OFF by default - enable with
-`uci set firewall.@defaults[0].fullcone=1`,
-`uci set firewall.@zone[1].fullcone=1`, `uci commit firewall`,
-`/etc/init.d/firewall restart`; check with `nft list ruleset | grep fullcone`.
-It has not been tested together with NSS/ECM hardware forwarding on this
-board, which hands established connections to the firmware.
+apply cleanly against Linux 6.18). It is ON by default: a uci-defaults script
+sets `defaults.fullcone=1` and `fullcone=1` on every masquerading zone on each
+flash. Coexistence with NSS/ECM was verified on the device (rules generated,
+WAN connectivity and ECM connection counting all normal). Turn it off with
+`uci set firewall.@defaults[0].fullcone=0`,
+`uci set firewall.@zone[1].fullcone=0`, `uci commit firewall`,
+`/etc/init.d/firewall restart`; `nft list ruleset | grep fullcone` should then
+be empty. Long-run EIM/EIF behaviour under heavy NAT load has no dedicated
+test; NSS/ECM hands established connections to the firmware, which bypasses
+later conntrack processing.
 
 Calibration data is extracted by `11-ath11k-caldata` from `0:art` at 0x1000
 (2.4 GHz) and 0x26800 (5 GHz), 128 KiB each, raw - patching the MAC into this

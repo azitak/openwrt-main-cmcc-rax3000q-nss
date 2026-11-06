@@ -180,12 +180,11 @@ URL（`CONFIG_FEED_nss=m` 修）；`nssinfo` 全组 `-22` 是 `qca-nss-netlink.k
 
 - caldata 两条 raw-extract 规则、`files/` 四个文件、`CONFIG_FEED_nss=m`、
   `check-dts-labels.py` 早期闸门；修复清单见 README 第 2b 节。
-- 仍需真机确认：两个射频 probe 出 `phy0`/`phy1` 并能关联、wifili 是否真的
-  把无线流量送进 NSS（`logread -e nss` 的 "Wi-Fi on the NSS path"）、
-  `apk update` 干净、`nssinfo` 不再报 `-22`、sysupgrade 保留配置后
-  `99-rax3000q-firstboot` 能从 `/rom` 恢复无线配置、补回 rc.local 的 netlink 加载行。
-  5c 又追加了 fullcone / USTC 源 / LuCI 包 / 11k/v/r，这些连同上面的项目
-  **在下文记录的手动构建之前都还没有编译或真机验证**。
+- 真机确认（build-20261106_235754，全部通过）：两个射频 probe 出 `phy0`/`phy1`
+  且关联成功（5G HE160）、`apk update` 干净、`nssinfo` 不再报 `-22`
+  （rc.local 的 netlink 加载行生效）。sysupgrade 保留配置后的自愈脚本
+  （`99-rax3000q-firstboot` 从 `/rom` 恢复无线配置）逻辑审查通过、未实地触发。
+  5c 追加的 fullcone / USTC 源 / LuCI 包 / 11k/v/r 已随该镜像一并验证。
 
 ## 5c. 第三轮：apk 源 / 默认包 / fullcone / 11k/v/r
 
@@ -226,14 +225,44 @@ bootstrap 保持默认主题，argon 只作为可选项。
 10 个补丁文件 + `0002-sonic-fullcone-libnftnl.patch`（`PKG_FIXUP:=autoreconf`）
 + LuCI feed 补丁与中文翻译。四个内核补丁（984/985/986/987）已在
 torvalds/linux v6.18 的对应文件上逐个 `patch` 验证 rc=0；LuCI 的
-`zones.js` 补丁也对 luci master `patch --dry-run` 通过。默认 `fullcone=0`，
-不影响 NSS/ECM；与硬件加速同时开启的组合**未在本板实测**。
+`zones.js` 补丁也对 luci master `patch --dry-run` 通过。默认开启（见 5d），
+与硬件加速共存的真机验证也在 5d。
 
 **本地验证**：`bash -n setup.sh`、两个 git 补丁 `apply --check`、
 把 setup.sh 第 5 节抽出来在构造好的树上干跑（补上 defconfig 才会派生的
 4 个 kmod 符号后）→ 全部 `ok`、无 MISSING/FORBIDDEN。
 **仍待一次真实构建验证**：内核补丁在打过 OpenWrt/NSS 补丁的完整内核树上
 能否全部应用、argon feed 拉取、fullcone 用户态编译、LuCI 补丁在完整 feed 上应用。
+
+## 5d. 第四轮：fullcone 默认开启 + nssinfo 修复
+
+镜像 build-20261106_235754（213 包）真机验证全部通过后遗留的两个问题在此修复。
+
+**fullcone 默认开启**。真机上 `defaults.fullcone='1'` 已存在但 wan zone 没开——
+排查发现它不是镜像里任何脚本设的（`/rom/etc/uci-defaults/` 无 fullcone 相关），
+是早期真机测试手工设置的残留。修复为镜像自带默认：新增
+`files/etc/uci-defaults/16-rax3000q-fullcone`，设置 `defaults.fullcone='1'`
+并为所有 masq zone 开 `fullcone`。真机实测（先手工设置同值再重启防火墙）：
+`nft list ruleset` 出现 dstnat + srcnat 两条 fullcone 规则
+（`tcp/udp/dccp/sctp/udplite`），WAN ping 正常、ECM 连接计数正常——
+**与 NSS/ECM 共存无异常**。注意 uci-defaults 每次刷机重新执行：
+用户手动关闭的 fullcone 会在下次 sysupgrade 后恢复默认开启。
+
+**nssinfo 修复**（`openwrt/feeds/nss-userspace-oss/patches/0040-*.patch`，
+由 setup.sh 装进 nss feed 的 `nss-userspace-oss` 包）。真机 PTY 实测发现两件事：
+ncurses UI 其实能跑（无 TTY 时 rc=1 只是 curses 起不来），但 ① 每个内核没编的
+netlink 族（capwap/c2c/edma/reasm/l2tpv2…）各打三行错误；② 退出必崩——
+`nssinfo_deinit()` 先 `nss_nlmcast_sock_close()`（ref_cnt→0、socket 释放），
+再跑各子系统 deinit，后者对已关闭的 socket 调 `nss_nlsock_leave_grp()`，
+`assert(sock->ref_cnt > 0)` 失败 → SIGABRT。补丁两处：
+`nss_nlsock_join_grp/leave_grp` 组解析失败时返回静默 `-ENOENT`
+（族未注册=未编译，不是错误），nssinfo 跳过这些族；
+`nssinfo_deinit()` 把关 socket 挪到子系统 deinit 之后。
+补丁在"已应用 000/002/0031"的源码上 `patch --dry-run` 通过。
+
+**代码梳理**：setup.sh 头部注释与校验闸门同步（新增 nssinfo 补丁、fullcone
+默认开启、`uci-defaults/*` 整体 chmod 755）；README / README.en / PORTING /
+workflow release-notes 里"fullcone 默认关闭""尚未编译验证"等过期表述全部更新。
 
 ## 6. 已知风险
 
@@ -242,8 +271,9 @@ torvalds/linux v6.18 的对应文件上逐个 `patch` 验证 rc=0；LuCI 的
   失败表现为射频留在主机栈，路由不受影响。
 - **256 MB 的内存余量本来就紧**：802.11s mesh、多 SSID、USB 存储都会吃内存；
   基线明确说 256m 组不编 mesh offload。
-- **fullcone NAT 与 NSS/ECM 的组合未实测**：ECM 把已建立连接交给固件转发，
-  后续 conntrack 处理（含 fullcone 的 3 元组映射）可能被绕过；要验证 EIM/EIF
-  效果先关 `nss.general.enabled`。fullcone 默认关闭，不影响正常加速路径。
+- **fullcone NAT 与 NSS/ECM 组合**：基本共存已实测正常（规则、连通性、ECM 计数），
+  但 ECM 把已建立连接交给固件转发，后续 conntrack 处理（含 fullcone 的 3 元组映射）
+  可能被绕过；长时间大流量下的 EIM/EIF 行为没有专项测试，介意可
+  `uci set firewall.@defaults[0].fullcone='0'` 关闭。
 - **镜像里的 kmod 不能从官方 feed 装**（vermagic 不同）。要什么就加进种子重编。
 - 首次刷入需要 U-Boot TFTP；原厂 `bootipq` 的 A/B 槽未改动，另一槽仍可回退。
