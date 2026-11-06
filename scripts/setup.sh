@@ -350,6 +350,10 @@ check 'CONFIG_PACKAGE_luci=y'
 check 'CONFIG_PACKAGE_luci-theme-argon=y'
 check 'CONFIG_PACKAGE_luci-app-upnp=y'
 check 'CONFIG_PACKAGE_luci-i18n-base-zh-cn=y'
+# zram swap, lz4 backend (cheapest on the dual-core A53)
+check 'CONFIG_PACKAGE_zram-swap=y'
+check 'CONFIG_KERNEL_ZRAM_BACKEND_LZ4=y'
+check 'CONFIG_KERNEL_ZRAM_DEF_COMP_LZ4=y'
 # full wpad is what enables 802.11v; the basic variant must not come back
 check 'CONFIG_PACKAGE_wpad-mbedtls=y'
 forbid 'CONFIG_PACKAGE_wpad-basic-mbedtls=y'
@@ -363,6 +367,7 @@ for f in \
   "$OW/files/etc/config/wireless" \
   "$OW/files/etc/uci-defaults/99-rax3000q-firstboot" \
   "$OW/files/etc/uci-defaults/16-rax3000q-fullcone" \
+  "$OW/files/etc/uci-defaults/17-rax3000q-zram" \
   "$OW/files/etc/rc.local" \
   "$OW/target/linux/generic/hack-6.18/984-add-sonic-fullcone-support.patch" \
   "$OW/target/linux/generic/hack-6.18/987-sonic-fullcone-fix-races-and-drops.patch" \

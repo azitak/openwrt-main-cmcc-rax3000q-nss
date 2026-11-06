@@ -1,0 +1,8 @@
+# zram-swap: the kernel is built with the lz4 backend only, so say so
+# explicitly.  The zram init script's own default is "lzo", which is not
+# compiled in and would log a "not supported" line on every boot.
+# Size is left at the package default (RAM/2, ~124 MiB here); tune with
+#   uci set system.@system[0].zram_size_mb='96'
+uci -q set system.@system[0].zram_comp_algo='lz4'
+uci -q commit system
+exit 0
