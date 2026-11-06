@@ -189,9 +189,16 @@ ls bin/targets/qualcommax/ipq50xx/
 
 ### CI
 
-每次 push 到 `main` 自动编译并发布 Release（`build-YYYYMMDD_HHMMSS`）。
-手动跑可以指定 `base_ref`（换基线 commit）和 `make_release`（是否发 Release）。
-基线是**按 commit 固定**的：NSS 补丁与 6.18.60 内核绑得很紧，跟着分支头跑容易踩空。
+**只手动触发**：GitHub Actions → `Build CMCC RAX3000Q` → `Run workflow`。
+push / PR 都**不会**编译（一次完整镜像约 90 分钟，改文档不值得跑一轮）。
+需要时可选：
+
+- `prepare_only=true`：只准备树 + 校验配置，约 5 分钟，不编译也不发 Release；
+- `make_release=false`：编译出固件并上传 artifact，但不发 Release；
+- `base_ref`：换基线 commit。
+
+默认编译并发布 Release（`build-YYYYMMDD_HHMMSS`）。基线是**按 commit 固定**的：
+NSS 补丁与 6.18.60 内核绑得很紧，跟着分支头跑容易踩空。
 
 ---
 

@@ -8,12 +8,11 @@ name: Build CMCC RAX3000Q (main + NSS)
 # ~200 upstream commits on top of OpenWrt main, and the NSS patches are tuned
 # to its exact kernel (6.18.60).  override `base_ref` to follow the branch.
 
+# Manual only.  A full image costs ~90 minutes of runner time, so pushes and
+# pull requests must NOT start one: go to Actions -> "Build CMCC RAX3000Q" ->
+# Run workflow when a new image is actually wanted.  `prepare_only` gives a
+# ~5 minute config/tree check without building anything.
 on:
-  push:
-    branches: [ main ]
-    paths-ignore: [ 'docs/**', '**.md' ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       base_ref:
@@ -312,9 +311,7 @@ jobs:
       - name: Publish release
         if: >-
           success() && github.ref == 'refs/heads/main' &&
-          (github.event_name == 'push' ||
-           (github.event_name == 'workflow_dispatch' &&
-            github.event.inputs.make_release == 'true'))
+          github.event.inputs.make_release != 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ env.DATE }}

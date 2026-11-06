@@ -116,8 +116,11 @@ board's blob makes the firmware assert. The baseline script had no
 ships the wireless config, a first-boot repair for upgrades from that image,
 and an rc.local that loads `qca-nss-netlink` so `nssinfo` works.
 
-CI builds every push to `main` and publishes a release; the baseline commit is
-pinned, because the NSS patches are tied to 6.18.60.
+CI is **manual only**: Actions -> "Build CMCC RAX3000Q" -> Run workflow.
+Pushes and PRs do not trigger a build (one image costs ~90 minutes). Use
+`prepare_only` for a ~5 minute tree/config check, `make_release=false` to keep
+the images as artifacts only, and `base_ref` to change the baseline commit.
+The baseline is pinned because the NSS patches are tied to kernel 6.18.60.
 
 ## Checking that the offload is on
 
