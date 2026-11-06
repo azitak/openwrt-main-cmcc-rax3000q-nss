@@ -1,0 +1,121 @@
+diff --git a/target/linux/qualcommax/dts/ipq5018-rax3000q.dts b/target/linux/qualcommax/dts/ipq5018-rax3000q.dts
+index 0d88be7..2e95e68 100644
+--- a/target/linux/qualcommax/dts/ipq5018-rax3000q.dts
++++ b/target/linux/qualcommax/dts/ipq5018-rax3000q.dts
+@@ -4,6 +4,7 @@
+ 
+ #include "ipq5018.dtsi"
+ #include "ipq5018-ess.dtsi"
++#include "ipq5018-nss.dtsi"
+ #include "ipq5018-qcn6122.dtsi"
+ 
+ #include <dt-bindings/gpio/gpio.h>
+@@ -26,7 +27,9 @@
+ 	};
+ 
+ 	chosen {
+-		bootargs-append = " root=/dev/ubiblock0_1 swiotlb=1 coherent_pool=2M";
++		/* 256 MB board: 512K coherent pool is enough with patch 0828,
++		 * and ubi.mtd= keeps a U-Boot that does not pass it bootable. */
++		bootargs-append = " root=/dev/ubiblock0_1 ubi.mtd=rootfs coherent_pool=512K";
+ 		stdout-path = "serial0:115200n8";
+ 	};
+ 
+@@ -76,6 +79,16 @@
+ 	};
+ };
+ 
++/*
++ * 256 MB board: the stock firmware (AP-MP02.1, MP_256) keeps the NSS
++ * firmware in 8 MiB; ipq5018.dtsi sizes the region for 512 MB boards.
++ * The driver reports whatever it finds as heap_ddr_size and the MP firmware
++ * boots and runs at full throughput in 8 MiB.
++ */
++&nss_region {
++	reg = <0x0 0x40000000 0x0 0x800000>;
++};
++
+ &sleep_clk {
+ 	clock-frequency = <32000>;
+ };
+@@ -109,13 +122,19 @@
+ 	pinctrl-names = "default";
+ 	status = "okay";
+ 
+-	//GigaDevice GD5F1GQ5REYIG
++	/*
++	 * Two parts ship on this board: GigaDevice GD5F1GQ5REYIG and
++	 * Dosilicon DS35Q1GA-IB / DS35M1GA (manufacturer id 0xe5, added by
++	 * target/linux/qualcommax/patches-6.18/0810).  The vendor bootloader
++	 * and the stock firmware use 4-bit ECC per 512 bytes on both; with 8
++	 * the data U-Boot wrote into "rootfs" reads back as ECC errors.
++	 */
+ 	nand@0 {
+ 		compatible = "spi-nand";
+ 		reg = <0>;
+ 		nand-ecc-engine = <&qpic_nand>;
+ 		nand-ecc-step-size = <512>;
+-		nand-ecc-strength = <8>;
++		nand-ecc-strength = <4>;
+ 		nand-bus-width = <8>;
+ 
+ 		partitions {
+@@ -318,10 +337,13 @@
+ 	};
+ };
+ 
+-//256M RAM is too small for ath11k, so WiFi is disabled to prevent OOM.
+-
++/*
++ * Both radios are enabled on this port: the image is built for 256 MB
++ * (ATH11K_MEM_PROFILE_256M + NSS_MEM_PROFILE_LOW), which is what makes
++ * ath11k fit here, and mode 2 is the profile the NSS wifili path needs.
++ * Upstream disables them because it ships the 512 MB defaults.
++ */
+ &q6v5_wcss {
+-	status = "disabled";
+ 	/* The QCN6102 radio should map to UPD ID 2. Without       */
+ 	/* bootargs, the firmware will expect it to be on UPD ID 3 */
+ 
+@@ -335,22 +357,22 @@
+ 
+ &wifi {
+ 	// IPQ5018
+-	status = "disabled";
++	status = "okay";
+ 
+ 	qcom,rproc = <&q6_wcss_pd1>;
+ 	qcom,calibration-variant = "CMCC-RAX3000Q";
+-	qcom,ath11k-fw-memory-mode = <1>;
++	qcom,ath11k-fw-memory-mode = <2>;
+ 	qcom,bdf-addr = <0x4c400000>;
+ };
+ 
+ &wifi1 {
+ 	// QCN6102 5G
+-	status = "disabled";
++	status = "okay";
+ 
+ 	qcom,rproc = <&q6_wcss_pd2>;
+ 	qcom,userpd-subsys-name = "q6v5_wcss_userpd2";
+ 	qcom,calibration-variant = "CMCC-RAX3000Q";
+-	qcom,ath11k-fw-memory-mode = <1>;
++	qcom,ath11k-fw-memory-mode = <2>;
+ 	qcom,bdf-addr = <0x4d100000>;
+ 	qcom,m3-dump-addr = <0x4df00000>;
+ };
+diff --git a/target/linux/qualcommax/image/ipq50xx.mk b/target/linux/qualcommax/image/ipq50xx.mk
+index 067d2a5..78c2f3f 100644
+--- a/target/linux/qualcommax/image/ipq50xx.mk
++++ b/target/linux/qualcommax/image/ipq50xx.mk
+@@ -119,6 +119,10 @@ define Device/cmcc_rax3000q
+ 	PAGESIZE := 2048
+ 	IMAGE_SIZE := 59392k
+ 	NAND_SIZE := 128m
++	# upstream ships this device without DEVICE_PACKAGES, so a stock
++	# image carries neither ath11k firmware nor the board's BDF
++	DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 \
++		ipq-wifi-cmcc_rax3000q
+ endef
+ TARGET_DEVICES += cmcc_rax3000q
+ 

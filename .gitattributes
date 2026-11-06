@@ -1,0 +1,8 @@
+# Everything in this repository is text that runs on Linux; keep it LF so that
+# setup.sh stays executable and the kernel patches keep their exact context.
+* text=auto eol=lf
+*.patch text eol=lf
+*.bin binary
+*.ipq5018 binary
+*.qcn6122 binary
+*.lmo binary

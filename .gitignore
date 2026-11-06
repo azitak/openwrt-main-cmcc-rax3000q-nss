@@ -1,0 +1,11 @@
+# local build / inspection checkouts (never part of this repository)
+/openwrt-main/
+/nss-edma/
+/nss-packages/
+/baseline/
+/openwrt/logs/
+
+# build artefacts
+*.log
+build-info.txt
+release-notes.md
