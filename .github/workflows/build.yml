@@ -144,6 +144,27 @@ jobs:
           # a zero-length download is a silent poison pill later in the build
           find dl -size -1024c -type f -print -delete || true
 
+      - name: Check the board DTS references
+        if: env.PREPARE_ONLY != 'true'
+        # dtc reports a missing label at minute 95 of a 95-minute build: after
+        # the kernel, the toolchain and every package, in target/linux/install.
+        # Preparing the kernel tree (which the build does anyway) puts the real
+        # ipq5018.dtsi, with its OpenWrt patches, on disk - so the same check
+        # can run as text in seconds. It caught q6_wcss_pd1/q6_wcss_pd2, which
+        # upstream's rax3000q DTS still uses and this kernel no longer has.
+        run: |
+          set -euo pipefail
+          cd openwrt
+          make -j"$(nproc)" target/linux/prepare
+          KDIR=$(echo build_dir/target-*/linux-qualcommax_ipq50xx/linux-*)
+          echo "kernel tree: $KDIR"
+          python3 ../rax3000q/scripts/check-dts-labels.py \
+            target/linux/qualcommax/dts/ipq5018-rax3000q.dts \
+            target/linux/qualcommax/dts \
+            target/linux/qualcommax/files/arch/arm64/boot/dts/qcom \
+            target/linux/qualcommax/patches-6.18 \
+            "$KDIR/arch/arm64/boot/dts/qcom"
+
       - name: Compute ccache key
         id: ccache
         if: env.PREPARE_ONLY != 'true'
