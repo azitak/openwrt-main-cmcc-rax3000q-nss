@@ -125,11 +125,35 @@ CPU 链路：**QCA8337 port0 --SGMII--> gmac1（`eth0`）**。gmac0（内部 GE 
   NAME→DATA（QSDK 的 36/96、主线的 255+variant、无 variant 兜底、纯 chip-id 兜底），
   安装时覆盖 `ath11k-firmware-ipq5018-qcn6122` 的通用 BDF。
 
+### 2b. `openwrt/0001-*.patch` 里的 caldata 规则 + `files/`（rootfs overlay）
+
+BDF 只解决"板级射频参数"，**校准数据（caldata）是另一份文件**，ath11k 6.18 在
+AHB 平台上硬性要求它：`11-ath11k-caldata` 按 `$FIRMWARE` 从 `0:art` 提取出
+`cal-ahb-c000000.wifi.bin`（2.4G，偏移 `0x1000`）和
+`cal-ahb-b00a040.wifi.bin`（5G，偏移 `0x26800`），各 128 KiB。基线脚本没有
+`cmcc,rax3000q` 分支，两个文件都生成不出来，驱动报
+`failed to load board data file: -12` 后放弃 probe —— 表现为没有 `phy`、没有
+wlan 接口、`/etc/config/wireless` 是 0 字节。补丁给这块板加了两条 **raw extract**
+规则：不做 `ath11k_patch_mac` / `ath11k_remove_regdomain`，因为这块板的 cal blob
+开头就是它自己的 RF 表，改 0x0e–0x13 会让固件在 `phyrf_reset.c` 断言、
+WMI 永远不 ready（上一版 25.12 在真机上踩过）。
+
+`files/` 里的三个文件随镜像进入 rootfs：
+
+| 文件 | 作用 |
+|---|---|
+| `etc/config/wireless` | 两个射频开机即启用，SSID `RAX3000Q-2G/-5G`，开放网络，country CN，2.4G HE40 / 5G HE160 |
+| `etc/uci-defaults/99-rax3000q-firstboot` | 从首版镜像**保留配置** sysupgrade 时，`/etc/config/wireless`（0 字节）和 `/etc/rc.local` 都在 `keep.d/base-files-essential` 里，会被旧版盖住新文件；脚本从 `/rom` 恢复无线配置、按运行时 sysfs 校正 radio path，并补回 rc.local 里的 netlink 加载行 |
+| `etc/rc.local` | 开机末段 `modprobe qca-nss-netlink`。这个 kmod 故意没有 `AUTOLOAD`（放 `/etc/modules.d` 会让 kmodloader 在 NSS 服务 arm 端口之前把 `qca-nss-drv` 拉起来）；不加载它 `nssinfo` 的每个 netlink mcast group 都报 `-22`，而数据面转发本身完全正常 |
+
 ### 3. `config/cmcc_rax3000q.config`（kconfig 种子）
 
 `Device/cmcc_rax3000q` 单设备 + 256M 档位（`ATH11K_MEM_PROFILE_256M=y`、
 `NSS_MEM_PROFILE_LOW=y`）+ `nss-tools-dwmac` + Wi-Fi offload + 12.5 固件 +
 SQM（装进镜像但默认关闭）+ LuCI（NSS 树自带的镜像不带 LuCI，本仓库带上并加中文）。
+另外 `CONFIG_FEED_nss=m`：nss feed 是本项目的本地 feed，官方下载站没有它的 index，
+若让它以 `y` 生成 `/etc/apk/repositories` 条目，`apk update` 每台机器都会报
+`1 unavailable`。tristate `m` 只把这一行注释掉，包照常编译进镜像。
 
 ### 4. `scripts/setup.sh` + `.github/workflows/build.yml`
 
@@ -194,24 +218,24 @@ reset
 nanddump -f art.bin /dev/mtd$(grep '"0:art"' /proc/mtd | cut -d: -f1)
 ```
 
-默认 LAN 地址 **192.168.1.1**。设备树里两个射频都是 `okay`，驱动会 probe 出
-`phy0` / `phy1`（`iw dev` 能看到两个 wiphy）；但 `/etc/config/wireless` 沿用上游 main
-的默认值——射频是 `disabled 1`，**首次要在 LuCI（网络 → 无线）或 uci 里启用并设
-SSID/密码**：
+默认 LAN 地址 **192.168.1.1**。两个射频开机即启用，SSID
+`RAX3000Q-2G` / `RAX3000Q-5G`，**默认开放无密码**（沿用上一版这块板的行为）。
+在任何正式场合使用前请先加密码：
 
 ```
-uci set wireless.radio0.disabled=0
-uci set wireless.radio1.disabled=0
-uci set wireless.default_radio0.ssid='RAX3000Q-2G'
-uci set wireless.default_radio1.ssid='RAX3000Q-5G'
 uci set wireless.default_radio0.encryption='sae-mixed'
 uci set wireless.default_radio0.key='至少八位'
 uci set wireless.default_radio1.encryption='sae-mixed'
 uci set wireless.default_radio1.key='至少八位'
-uci commit wireless && wifi
+uci commit wireless && wifi reload
 ```
 
-5 GHz 默认 36 信道 / HE160，开机后第一次起 5G 有一次 DFS CAC（约 60 s）。
+镜像里是 `wpad-basic-mbedtls`：支持 WPA2 / WPA3-SAE / OWE / 802.11r / 802.11w，
+**不支持 802.11k/v 和 mesh**（配置里写了 `rrm_neighbor_report` 之类，hostapd 会
+直接拒绝，两个射频一起起不来）。需要 11k/v 就 `apk add wpad-mbedtls` 替换掉它。
+
+5 GHz 默认 36 信道 / HE160、country `CN`；这一段覆盖 DFS，开机第一次起 5G
+有一次约 60 s 的 CAC，之后才发信标。想去掉等待就改成 `HE80`。
 
 ---
 

@@ -95,10 +95,26 @@ cd openwrt && make -j$(nproc)
 
 Products: `*-squashfs-factory.ubi` (vendor U-Boot over TFTP: `tftpboot …` then
 `flash rootfs`) and `*-squashfs-sysupgrade.bin`. Default LAN is 192.168.1.1.
-Both radios are `okay` in the device tree and probe as `phy0`/`phy1`, but
-`/etc/config/wireless` keeps upstream main's default (`disabled 1`): enable them
-and set an SSID/key in LuCI, or with `uci set wireless.radio0.disabled=0` and
-the rest of the usual WPA settings.
+Both radios come up enabled as `RAX3000Q-2G` / `RAX3000Q-5G`, **open with no
+password** (as in the earlier 25.12 build for this board). Add a key before
+using it anywhere that matters: `uci set wireless.default_radio0.encryption='sae-mixed'`,
+`set ... .key='your-key'`, repeat for `default_radio1`, then
+`uci commit wireless && wifi reload`.
+
+The image carries `wpad-basic-mbedtls`: WPA2 / WPA3-SAE / OWE / 802.11r /
+802.11w, but NOT 802.11k/v or mesh - hostapd rejects `rrm_neighbor_report`
+and friends outright, which takes *both* radios down. Replace it with
+`apk add wpad-mbedtls` if 11k/v is needed. 5 GHz is channel 36 / HE160 /
+country CN, so the first boot after powering on spends ~60 s in DFS CAC before
+the 5 GHz beacon appears; HE80 avoids that.
+
+Calibration data is extracted by `11-ath11k-caldata` from `0:art` at 0x1000
+(2.4 GHz) and 0x26800 (5 GHz), 128 KiB each, raw - patching the MAC into this
+board's blob makes the firmware assert. The baseline script had no
+`cmcc,rax3000q` case, so both radios failed to probe with
+`failed to load board data file: -12` and no wiphy appeared. `files/` also
+ships the wireless config, a first-boot repair for upgrades from that image,
+and an rc.local that loads `qca-nss-netlink` so `nssinfo` works.
 
 CI builds every push to `main` and publishes a release; the baseline commit is
 pinned, because the NSS patches are tied to 6.18.60.

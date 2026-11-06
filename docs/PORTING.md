@@ -139,19 +139,51 @@ CONFIG_NSS_MEM_PROFILE_LOW=y               CONFIG_PACKAGE_ipq-wifi-cmcc_rax3000q
 - 板级事实（交换机映射、ECC 4/512、`ubi.mtd=rootfs`、内存档位）来自上一版在**真机**上
   对照可启动镜像得出的结论，不是推测。
 
-## 5. 还需要真机确认（按顺序）
+## 5. 首版镜像的真机验证（2026-11-06，build-20261106_185530）
 
-1. `dmesg | grep -i spi-nand` → `Dosilicon SPI NAND was found. 128 MiB, 2048, OOB 64`，
-   并且 `/proc/mtd` 有 16 个 SMEM 分区。
-2. UBI attach、`/dev/ubiblock0_1` 出现、rootfs 挂载（这一步就是上一版失败的根因）。
-3. `ls /etc/rc.d | grep S19nss`、`cat /sys/kernel/debug/qca-dwmac-nss/status` →
-   `phys_if 1: started dev=eth0`。
-4. 两个射频 probe（`iw dev` 看到 `phy0-ap0` / `phy1-ap0`），2.4G 与 5G 都能关联。
-5. WAN DHCP 通、LAN 通、`tcp_accelerated_count` 在跑流量时增长、`top` 里 idle > 90%。
-6. `logread -e nss` 是否出现 "Wi-Fi on the NSS path" —— **本板最不确定的一条**：
-   写法与已验证的 256 MB 板型一致，但这块板的 `boot-args`（PD 2、reset GPIO 27）没在
-   真机上验证过。
-7. `sysupgrade -n` 从已运行的 OpenWrt 升级一次，确认 UBI 卷与分区布局没变。
+用户刷入后通过 SSH 做了一轮完整只读检查，结果如下。这些不是推测，是设备上
+`dmesg` / sysfs / debugfs / procd 日志的实际输出。
+
+| 项 | 结果 |
+|---|---|
+| Dosilicon DS35Q1GA | ✅ `spi-nand spi0.0: Dosilicon SPI NAND was found. 128 MiB, 2048, OOB 64`，ECC 4/512，16 个 SMEM 分区 |
+| UBI / rootfs | ✅ 三卷（kernel 5.6M / rootfs 10.1M / rootfs_data 87.7M），ubiblock0_1 挂载、overlay 74.8M 可用 |
+| 有线 | ✅ qca8k DSA，wan/lan1 1 Gbps，WAN DHCP 192.168.2.156，网关/外网/DNS 全通 |
+| **NSS 数据面** | ✅ `phys_if 1: started dev=eth0 fw_link=up`；`tx_redirect` 76529→77934、`rx_fw` 45270→46227 随一次真实下载增长；ECM `accelerated_count=44` / tcp 31 / udp 13，`stats_request_counter fail=0`；`qca-dsa-nss` wan/lan1 两个 firmware VLAN 节点、`alloc_failures=0`；NSS 8 MiB 固件 booted |
+| LuCI / SSH / apk | ✅ 登录 302→Overview 200，203 个包 |
+| **两个射频** | ❌ 没有 `phy`、没有 wlan、`/etc/config/wireless` 0 字节 |
+
+无线失败的根因链（**已闭环，不是 BDF、不是内存**）：
+
+1. 基线 `11-ath11k-caldata` 的 case 表没有 `cmcc,rax3000q`，走到 `*) exit 1`；
+2. procd 日志四条 `Could not find firmware .../cal-ahb-*.bin` 和 `caldata.bin`；
+3. 6.18 `ath11k_qmi_load_bdf_qmi()` 对 AHB 平台硬性要求 cal 文件，返回
+   `-12 (-ENOMEM)` → probe 中止。脚本自己的注释就写着
+   "ath11k hard-fails if the cal file is simply absent"；
+4. BDF 无嫌疑：`board-2.bin` 里 `chip-id=0,board-id=255,variant=CMCC-RAX3000Q`
+   与实测 `board_id 0xff` 匹配，日志没有 `qmi failed to fetch board file`；
+5. `0:art` 的 `0x1000` 和 `0x26800` 都是有效数据（非 0xFF），`0x46800` 起全 FF，
+   说明确实是两块各 0x20000 的 blob —— 只差提取规则。
+
+顺带查清的三件事：`apk update` 的 `1 unavailable` 是本地 nss feed 被写成官方
+URL（`CONFIG_FEED_nss=m` 修）；`nssinfo` 全组 `-22` 是 `qca-nss-netlink.ko`
+没有加载（该 kmod 刻意无 AUTOLOAD，由 `files/etc/rc.local` 在开机末段加载），
+数据面统计从 debugfs 读一切正常；`nssinfo` 报错期间 NSS 转发并没有受影响。
+
+另有两条**复查后确认不是故障**：`UBI error: cannot attach mtd15` 是
+`ubi.mtd=rootfs` 在 cmdline 里出现两次导致的重复 attach（第一次已成功，
+第二次 `-EBUSY`，无害）；蓝/红 status LED 常灭是 DTS 设计
+（`led-failsafe=blue`、`led-upgrade=blue`、`led-boot=red`、运行中=`green:wan`），
+绿灯有 netdev trigger 且链路 up 时亮，属正常。
+
+## 5b. 第二轮（本轮）改动与待确认
+
+- caldata 两条 raw-extract 规则、`files/` 三个文件、`CONFIG_FEED_nss=m`、
+  `check-dts-labels.py` 早期闸门；修复清单见 README 第 2b 节。
+- 仍需真机确认：两个射频 probe 出 `phy0`/`phy1` 并能关联、wifili 是否真的
+  把无线流量送进 NSS（`logread -e nss` 的 "Wi-Fi on the NSS path"）、
+  `apk update` 干净、`nssinfo` 不再报 `-22`、sysupgrade 保留配置后
+  `99-rax3000q-firstboot` 能从 `/rom` 恢复无线配置、补回 rc.local 的 netlink 加载行。
 
 ## 6. 已知风险
 

@@ -1,0 +1,52 @@
+# Shipped by this build.  Upstream main ships a zero-length wireless config and
+# leaves both radios disabled; this one comes up ready to associate.
+#
+# OPEN NETWORK BY DESIGN (same as the 25.12 build of this board): add a password
+# before using it anywhere that matters, e.g.
+#   uci set wireless.default_radio0.encryption='psk2+ccmp'
+#   uci set wireless.default_radio0.key='your-key'
+#   uci set wireless.default_radio1.encryption='psk2+ccmp'
+#   uci set wireless.default_radio1.key='your-key'
+#   uci commit wireless && wifi reload
+#
+# wpad-basic-mbedtls is in the image.  It supports WPA3-SAE / OWE / 802.11r /
+# 802.11w but NOT 802.11k/v or mesh: hostapd rejects a config containing
+# rrm_neighbor_report / bss_transition and then *both* radios stay down.  So
+# this file deliberately carries no k/v options.  Use wpad-mbedtls (installable
+# from the official feed) if 11k/v is needed.
+#
+# country CN keeps the 5 GHz radio legal and gives it a 160 MHz channel.
+# Channel 36 / HE160 overlaps DFS, so hostapd runs a ~60 s CAC on the first
+# boot before the 5 GHz beacon appears; HE80 avoids that at ~1/3 less throughput.
+
+config wifi-device 'radio0'
+	option type 'mac80211'
+	option path 'platform/soc@0/c000000.wifi'
+	option band '2g'
+	option channel 'auto'
+	option htmode 'HE40'
+	option country 'CN'
+	option cell_density '0'
+
+config wifi-iface 'default_radio0'
+	option device 'radio0'
+	option network 'lan'
+	option mode 'ap'
+	option ssid 'RAX3000Q-2G'
+	option encryption 'none'
+
+config wifi-device 'radio1'
+	option type 'mac80211'
+	option path 'platform/soc@0/b00a040.wifi'
+	option band '5g'
+	option channel '36'
+	option htmode 'HE160'
+	option country 'CN'
+	option cell_density '0'
+
+config wifi-iface 'default_radio1'
+	option device 'radio1'
+	option network 'lan'
+	option mode 'ap'
+	option ssid 'RAX3000Q-5G'
+	option encryption 'none'

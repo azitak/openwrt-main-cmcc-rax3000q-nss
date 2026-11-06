@@ -11,12 +11,15 @@
 # 2026, so the older "NSS = nss-dp + ssdk" recipe (mufeng05's PZ-L8 project)
 # cannot be applied to main any more; that tree is what replaced it.
 #
-# This project changes four things:
+# This project changes five things:
 #   1. edits to files the baseline already ships  -> openwrt/0001-*.patch
+#      (board DTS + image.mk + the rax3000q caldata cases)
 #   2. files the baseline does not have           -> openwrt/tree/, copied in
 #      (the Dosilicon SPI-NAND backport and the board's BDF package)
-#   3. the .config seed                           -> config/
-#   4. verification, so a missing piece fails here instead of after a build
+#   3. the rootfs overlay                        -> files/, copied into the
+#      build tree's own files/ (wireless config + repair + nss-netlink loader)
+#   4. the .config seed                           -> config/
+#   5. verification, so a missing piece fails here instead of after a build
 #
 # Idempotent: re-running on a prepared tree is a no-op for 1 and safe for the
 # rest.  RESEED=1 replaces an existing .config with the seed again.
@@ -72,6 +75,21 @@ say "Copying files the baseline does not have"
       install -Dm644 "$f" "$OW/${f#./}"
       echo "  ${f#./}"
   done )
+
+# ------------------------------------------------------------ 2b. rootfs overlay
+# OpenWrt copies the top-level files/ directory verbatim into the image.  It is
+# where the shipped wireless config, its first-boot repair script, and the
+# nss-netlink loader live: none of them belong in the source tree itself.
+if [ -d "$HERE/files" ]; then
+    say "Installing the rootfs overlay (files/)"
+    mkdir -p "$OW/files"
+    ( cd "$HERE/files" && find . -type f -print0 |
+      while IFS= read -r -d '' f; do
+          install -Dm644 "$f" "$OW/files/${f#./}"
+          echo "  files/${f#./}"
+      done )
+    chmod 755 "$OW/files/etc/rc.local" "$OW"/files/etc/uci-defaults/99-rax3000q-firstboot
+fi
 
 # The board DTS must exist and must carry the NSS include: without the node
 # qca-nss-drv never probes and the whole plane stays silent at runtime.
@@ -205,10 +223,18 @@ check 'CONFIG_PACKAGE_ath11k-firmware-ipq5018-qcn6122=y'
 check 'CONFIG_PACKAGE_ipq-wifi-cmcc_rax3000q=y'
 check 'CONFIG_ATH11K_MEM_PROFILE_256M=y'
 check 'CONFIG_NSS_MEM_PROFILE_LOW=y'
+# tristate M comments the feed's repository line out of /etc/apk/repositories.
+# The nss feed is not published on downloads.openwrt.org, so leaving it at Y
+# makes `apk update` report a missing index on every device.
+check 'CONFIG_FEED_nss=m'
+check 'CONFIG_PACKAGE_kmod-qca-nss-drv-netlink=y'
 
 for f in \
   "$OW/target/linux/qualcommax/patches-6.18/0810-mtd-spinand-add-support-for-Dosilicon-DS35Q1GA-DS35M1GA.patch" \
-  "$OW/package/ipq-wifi-cmcc_rax3000q/Makefile"
+  "$OW/package/ipq-wifi-cmcc_rax3000q/Makefile" \
+  "$OW/files/etc/config/wireless" \
+  "$OW/files/etc/uci-defaults/99-rax3000q-firstboot" \
+  "$OW/files/etc/rc.local"
 do
     if [ -f "$f" ]; then
         say2file "  ok       ${f#$OW/}"
@@ -227,6 +253,18 @@ grep -q 'nand-ecc-strength = <4>' "$DTS" ||
     { say2file "  MISSING  4-bit ECC in $DTS"; missing=1; }
 grep -q 'ubi.mtd=rootfs' "$DTS" ||
     { say2file "  MISSING  ubi.mtd=rootfs in $DTS bootargs-append"; missing=1; }
+CAL="$OW/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata"
+n=$(grep -c '^\s*cmcc,rax3000q)' "$CAL" 2>/dev/null || echo 0)
+[ "$n" = 2 ] ||
+    { say2file "  MISSING  rax3000q caldata cases in 11-ath11k-caldata (have $n, need 2)"; missing=1; }
+grep -q 'caldata_extract "0:art" 0x1000 0x20000' "$CAL" ||
+    { say2file "  MISSING  2.4 GHz caldata offset 0x1000"; missing=1; }
+grep -q 'caldata_extract "0:art" 0x26800 0x20000' "$CAL" ||
+    { say2file "  MISSING  5 GHz caldata offset 0x26800"; missing=1; }
+grep -q 'config wifi-device' "$OW/files/etc/config/wireless" ||
+    { say2file "  MISSING  radios in files/etc/config/wireless"; missing=1; }
+grep -q 'qca-nss-netlink' "$OW/files/etc/rc.local" ||
+    { say2file "  MISSING  qca-nss-netlink loader in files/etc/rc.local"; missing=1; }
 
 # Not a check: a per-symbol report of what defconfig did to the seed.  This is
 # what tells a dropped LuCI component from a dropped NSS driver, and it is the

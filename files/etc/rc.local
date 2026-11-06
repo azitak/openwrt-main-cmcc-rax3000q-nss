@@ -1,0 +1,14 @@
+# Put your custom commands here that should be executed once
+# the system init finished.
+
+# qca-nss-netlink registers the generic-netlink families and multicast groups
+# that nssinfo subscribes to.  The kmod deliberately has no AUTOLOAD: putting
+# it in /etc/modules.d would make kmodloader pull qca-nss-drv in before the
+# nss service arms a port, which is too early in the boot.  rc.local runs after
+# the data plane is up, so loading it here is safe.  Without it nssinfo fails
+# every group with -22 while the NSS forwarding itself works fine.
+if [ -e "/lib/modules/$(uname -r)/qca-nss-netlink.ko" ]; then
+    modprobe qca-nss-netlink 2>/dev/null
+fi
+
+exit 0

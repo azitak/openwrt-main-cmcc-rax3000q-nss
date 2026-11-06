@@ -168,3 +168,35 @@ index 067d2a5..78c2f3f 100644
  endef
  TARGET_DEVICES += cmcc_rax3000q
  
+diff --git a/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata b/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
+index 0861b42..57c65cc 100644
+--- a/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
++++ b/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata
+@@ -31,6 +31,15 @@ case "$FIRMWARE" in
+ 		ath11k_set_macflag
+ 		ath11k_remove_regdomain
+ 		;;
++	cmcc,rax3000q)
++		# Raw extract only, no MAC or regdomain patching.  This cal blob
++		# begins with the board's own RF tables: ath11k_patch_mac rewrites
++		# bytes 0x0e-0x13 of them, the firmware then asserts in
++		# phyrf_reset.c and never reaches WMI ready (both radios die with
++		# "failed to receive wmi unified ready event: -110").  The vendor
++		# image extracts it as-is.
++		caldata_extract "0:art" 0x1000 0x20000
++		;;
+ 	cudy,p5)
+ 		caldata_extract "0:art" 0x1000 0x20000
+ 		wlan_mac=$(get_mac_binary "$(find_mtd_chardev bdinfo)" 0xde00)
+@@ -166,6 +175,11 @@ case "$FIRMWARE" in
+ 		ath11k_remove_regdomain
+ 		ath11k_set_macflag
+ 		;;
++	cmcc,rax3000q)
++		# Same as the 2.4 GHz part: raw extract, no MAC or regdomain
++		# patching (see the comment in the IPQ5018 case above).
++		caldata_extract "0:art" 0x26800 0x20000
++		;;
+ 	cudy,p5)
+ 		caldata_extract "0:art" 0x26800 0x20000
+ 		wlan_mac=$(get_mac_binary "$(find_mtd_chardev bdinfo)" 0xde00)

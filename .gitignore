@@ -9,3 +9,11 @@
 *.log
 build-info.txt
 release-notes.md
+
+# firmware downloaded from a release for local inspection / flashing
+/firmware/
+/.ci-*.zip
+/.ci-*.log
+/.config.ci
+/.last-run
+/.ipq5018-upstream.dtsi

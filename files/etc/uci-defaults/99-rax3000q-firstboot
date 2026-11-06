@@ -1,0 +1,68 @@
+#!/bin/sh
+# First-boot repair after a sysupgrade with "keep configuration".
+#
+# Two files that the first image of this project got wrong are in OpenWrt's
+# keep.d/base-files-essential, so sysupgrade carries the OLD copies over and
+# they shadow the new ones shipped in the squashfs:
+#
+#   /etc/config/wireless  - was 0 bytes in the first image
+#   /etc/rc.local         - had no qca-nss-netlink loader
+#
+# Fix both here, at the end of uci-defaults (the 99- prefix), so a kept-config
+# upgrade ends up in the same state as a clean factory flash.  This script is
+# removed by /etc/init.d/boot after it succeeds, and reappears with every new
+# image, so it runs again on the next upgrade.
+. /lib/functions.sh
+
+# ---------------------------------------------------------------- wireless
+cfg=/etc/config/wireless
+rom=/rom/etc/config/wireless
+restored=0
+
+if [ ! -s "$cfg" ] || ! grep -q "config wifi-device" "$cfg"; then
+    if [ -s "$rom" ]; then
+        cp "$rom" "$cfg"
+        restored=1
+        logger -t rax3000q-firstboot "restored shipped wireless config from /rom"
+    fi
+fi
+
+if [ "$restored" = 1 ]; then
+    # The radio paths are stable on this SoC, but wifi-scripts may have
+    # generated them with a different prefix.  Rewrite only paths that clearly
+    # belong to these two AHB radios, then drop any inherited 'disabled'.
+    for phy in /sys/class/ieee80211/phy*; do
+        [ -e "$phy" ] || continue
+        p=$(readlink -f "$phy/device" 2>/dev/null | sed -n 's|.*/\(platform/.*\)|\1|p')
+        [ -n "$p" ] || continue
+        case "$p" in
+            *c000000.wifi) uci -q set wireless.radio0.path="$p" ;;
+            *b00a040.wifi) uci -q set wireless.radio1.path="$p" ;;
+        esac
+    done
+    uci -q delete wireless.radio0.disabled
+    uci -q delete wireless.radio1.disabled
+    uci commit wireless
+fi
+
+# ------------------------------------------------------------- nss-netlink
+# qca-nss-netlink has no AUTOLOAD on purpose: /etc/modules.d would make
+# kmodloader pull qca-nss-drv in before the nss service arms a port.  Loading
+# it from rc.local (the very end of boot) is safe; without it nssinfo fails
+# every multicast group with -22 although the data plane forwards fine.
+rc=/etc/rc.local
+if [ -f "$rc" ] && ! grep -q 'qca-nss-netlink' "$rc"; then
+    tmp="$rc.tmp"
+    sed '/^[[:space:]]*exit 0/d' "$rc" > "$tmp"
+    cat >> "$tmp" <<'EOS'
+
+# Loaded here because kmodloader would do it too early (see the project docs).
+[ -e "/lib/modules/$(uname -r)/qca-nss-netlink.ko" ] && modprobe qca-nss-netlink 2>/dev/null
+exit 0
+EOS
+    mv "$tmp" "$rc"
+    chmod 755 "$rc" 2>/dev/null || true
+    logger -t rax3000q-firstboot "added the qca-nss-netlink loader to rc.local"
+fi
+
+exit 0
