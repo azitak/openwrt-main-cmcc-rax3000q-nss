@@ -19,3 +19,6 @@ release-notes.md
 /.ipq5018-upstream.dtsi
 
 /prep.zip
+
+# WorkBuddy agent workspace (local only, never part of this repository)
+/.workbuddy/
