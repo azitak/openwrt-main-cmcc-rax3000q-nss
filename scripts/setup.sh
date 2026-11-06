@@ -111,11 +111,33 @@ say "Updating and installing feeds"
 # declared below gets an index - a hand-maintained list here once forgot argon
 # and defconfig silently dropped luci-theme-argon.
 #
-# They are taken from the GitHub mirrors rather than git.openwrt.org: the
-# Actions runners reach github.com directly and git.openwrt.org over a much
-# slower path that occasionally stalls for tens of minutes (observed 2026-11-06:
-# one run spent 100 s here, the next was still cloning after 40 min).  The
-# mirrors carry the same master branch the snapshot is built against.
+# The git feeds use GitHub mirrors rather than git.openwrt.org: the Actions
+# runners reach github.com directly and git.openwrt.org over a much slower path
+# that occasionally stalls for tens of minutes (observed 2026-11-06: one run
+# spent 100 s here, the next was still cloning after 40 min).
+#
+# Argon is a src-link, not a src-git.  OpenWrt's include/scan.mk:77 strips
+# "/Makefile:.*" from each grep hit, which only works when the Makefile is in a
+# SUBDIRECTORY of the feed.  jerrykuku keeps it at the repository root, and its
+# trailing "# call BuildPackage - OpenWrt buildroot signature" comment then
+# survives as a whole line in FILELIST, making the next make fail with
+# "target pattern contains no '%'".  Staging the tarball one level down avoids
+# that; src-link also means no git pull and no extra clone.
+ARGON_LOCAL="$OW/feeds/argon-local"
+ARGON_PKG="$ARGON_LOCAL/luci-theme-argon"
+if [ ! -f "$ARGON_PKG/Makefile" ]; then
+    say "Staging the Argon theme into a local src-link feed"
+    mkdir -p "$ARGON_PKG"
+    ARGON_TGZ="$OW/argon-theme.tar.gz"
+    run 300 curl -fsSL "https://codeload.github.com/jerrykuku/luci-theme-argon/tar.gz/refs/heads/master" -o "$ARGON_TGZ"
+    tar -xzf "$ARGON_TGZ" -C "$ARGON_PKG" --strip-components=1
+    rm -f "$ARGON_TGZ"
+    rm -rf "$ARGON_PKG/Screenshots" "$ARGON_PKG/tests" "$ARGON_PKG/docs" "$ARGON_PKG/.github"
+    echo "  staged: $ARGON_PKG"
+fi
+# src-link init creates feeds/argon as a symlink; a stale one must go first.
+[ ! -L "$OW/feeds/argon" ] || rm -f "$OW/feeds/argon"
+
 FEEDS="$OW/feeds.conf"
 NSS_LINE=$(grep -m1 'nss-packages' "$OW/feeds.conf.default" 2>/dev/null || true)
 [ -n "$NSS_LINE" ] || {
@@ -128,8 +150,9 @@ src-git luci https://github.com/openwrt/luci.git
 $NSS_LINE
 # luci-theme-argon is not in the official luci feed.  jerrykuku's master has
 # ucode templates and is maintained against LuCI snapshot (PKG_RELEASE
-# 20261106); the sbwml fork targets the 25.12 branch instead.
-src-git argon https://github.com/jerrykuku/luci-theme-argon.git;master
+# 20261106); the sbwml fork targets the 25.12 branch instead.  It is staged
+# into feeds/argon-local/luci-theme-argon/ above (see the scan.mk note).
+src-link argon $OW/feeds/argon-local
 EOF
 cat "$FEEDS"
 
@@ -154,7 +177,8 @@ ok=0
 for attempt in 1 2; do
     # A clone that died mid-way leaves a directory that is not a git checkout.
     # scripts/feeds then refuses to touch it, and the retry fails the same way.
-    for d in packages luci nss argon; do
+    # argon is a src-link (no .git); only the three git feeds need this check.
+    for d in packages luci nss; do
         if [ -d "$OW/feeds/$d" ] && [ ! -d "$OW/feeds/$d/.git" ]; then
             echo "WARNING: feeds/$d is not a git checkout, removing it for a clean clone" >&2
             rm -rf "$OW/feeds/$d"
@@ -189,6 +213,14 @@ while read -r kind name _rest; do
     }
     echo "  feed index ok: $name"
 done < <(grep -vE '^[[:space:]]*(#|$)' "$FEEDS")
+
+# An index that exists but contains no packages is just as bad (this is what
+# the root-Makefile scan.mk bug produced before argon became a src-link).
+grep -q '^Package: luci-theme-argon$' "$OW/feeds/argon.index" || {
+    echo "ERROR: argon feed index has no luci-theme-argon package" >&2
+    exit 1
+}
+echo "  feed index ok: argon (luci-theme-argon present)"
 
 # The SONiC fullcone LuCI patch belongs to luci-app-firewall, which only exists
 # once the luci feed has been cloned, so it has to be copied now rather than

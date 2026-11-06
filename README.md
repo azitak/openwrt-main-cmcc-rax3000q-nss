@@ -191,8 +191,8 @@ nft list ruleset | grep fullcone
 `NSS_MEM_PROFILE_LOW=y`）+ `nss-tools-dwmac` + Wi-Fi offload + 12.5 固件 +
 SQM（装进镜像但默认关闭）。默认包还包含：
 
-- **LuCI**：`luci` 元包、`luci-theme-argon`（第三方，由 `setup.sh` 加 `argon` feed；
-  bootstrap 仍是默认主题，主题坏了也不会拖垮 Web UI）、`luci-app-upnp` +
+- **LuCI**：`luci` 元包、`luci-theme-argon`（第三方，由 `setup.sh` 以本地
+  `src-link` feed 提供；bootstrap 仍是默认主题，主题坏了也不会拖垮 Web UI）、`luci-app-upnp` +
   `miniupnpd`、以及 base/firewall/package-manager/upnp 四个简体中文语言包。
 - **完整 wpad**：`wpad-mbedtls`，并在 `DEVICE_PACKAGES` 里用
   `-wpad-basic-mbedtls` 排除掉默认 basic 变体，为了 802.11v。

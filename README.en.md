@@ -124,7 +124,7 @@ DFS CAC before the 5 GHz beacon appears; HE80 avoids that.
 **apk mirror**: this is a SNAPSHOT image. TUNA explicitly does not mirror
 snapshots (only releases), so the sources point at USTC, an OpenWrt tier-1
 mirror in China; all four indexes were checked. `luci`, `luci-theme-argon`
-(a third-party feed), `luci-app-upnp` and four zh_Hans i18n packages are in
+(a local src-link feed), `luci-app-upnp` and four zh_Hans i18n packages are in
 the image; bootstrap stays the default theme.
 
 **SONiC fullcone NAT**: the kernel/fw4/libnftnl/nftables/LuCI patches from
