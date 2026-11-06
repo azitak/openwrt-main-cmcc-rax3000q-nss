@@ -172,8 +172,12 @@ do
         missing=1
     fi
 done
-grep -q 'DS35Q1GA' "$OW/target/linux/qualcommax/patches-6.18/0810-*.patch" 2>/dev/null ||
-    { say2file "  MISSING  DS35Q1GA in the Dosilicon patch"; missing=1; }
+DOSI="$OW/target/linux/qualcommax/patches-6.18/0810-mtd-spinand-add-support-for-Dosilicon-DS35Q1GA-DS35M1GA.patch"
+# No glob inside quotes: "$DOSI" is one path, and a glob written *inside* the
+# quotes is not expanded - grep then looks for a file called "0810-*.patch",
+# fails, and the check reports a missing patch that is sitting right there.
+grep -q 'SPINAND_MFR_DOSILICON' "$DOSI" || { say2file "  MISSING  manufacturer id 0xe5 in $DOSI"; missing=1; }
+grep -q 'DS35Q1GA' "$DOSI" || { say2file "  MISSING  DS35Q1GA device entry in $DOSI"; missing=1; }
 grep -q 'nand-ecc-strength = <4>' "$DTS" ||
     { say2file "  MISSING  4-bit ECC in $DTS"; missing=1; }
 grep -q 'ubi.mtd=rootfs' "$DTS" ||
