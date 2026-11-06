@@ -25,12 +25,20 @@ on:
         type: boolean
         required: false
         default: true
+      prepare_only:
+        description: 'Stop after the tree is prepared and verified (no build)'
+        type: boolean
+        required: false
+        default: false
 
 env:
   BASE_REPO: https://github.com/kuncy7/openwrt-nss-edma.git
   # c3po-tag-8021q, 2026-11-05: OpenWrt main 2026-10-09 + NSS on kernel 6.18.60
   BASE_SHA: fb7e09acfea17c435338d9b631cbd33fc39c3c62
   BASE_BRANCH: c3po-tag-8021q
+  # A preparation-only run exists to check .config in ~15 minutes instead of
+  # discovering a dropped symbol after a 90-minute build.
+  PREPARE_ONLY: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.prepare_only) || 'false' }}
   TZ: Asia/Shanghai
 
 concurrency:
@@ -118,6 +126,7 @@ jobs:
           echo "Dosilicon driver, 4-bit ECC, UBI bootargs and the NSS node are in place"
 
       - name: Download sources
+        if: env.PREPARE_ONLY != 'true'
         timeout-minutes: 90
         env:
           GIT_HTTP_LOW_SPEED_LIMIT: 1000
@@ -137,6 +146,7 @@ jobs:
 
       - name: Compute ccache key
         id: ccache
+        if: env.PREPARE_ONLY != 'true'
         run: |
           set -euo pipefail
           cd openwrt
@@ -146,6 +156,7 @@ jobs:
           echo "prefix=ccache-rax3000q-${sum}-" >>"$GITHUB_OUTPUT"
 
       - name: Restore ccache
+        if: env.PREPARE_ONLY != 'true'
         uses: actions/cache@v4
         with:
           path: openwrt/.ccache
@@ -153,6 +164,7 @@ jobs:
           restore-keys: ${{ steps.ccache.outputs.prefix }}
 
       - name: Build
+        if: env.PREPARE_ONLY != 'true'
         env:
           CCACHE_DIR: ${{ github.workspace }}/openwrt/.ccache
           CCACHE_COMPILERCHECK: content
@@ -169,7 +181,7 @@ jobs:
           df -h / | tail -1
 
       - name: Collect build metadata
-        if: success()
+        if: success() && env.PREPARE_ONLY != 'true'
         run: |
           set -eu
           cd openwrt
@@ -189,7 +201,7 @@ jobs:
           echo "FIRMWARE=$GITHUB_WORKSPACE/openwrt/bin/targets/qualcommax/ipq50xx" >>"$GITHUB_ENV"
 
       - name: Verify the produced images
-        if: success()
+        if: success() && env.PREPARE_ONLY != 'true'
         run: |
           set -eu
           ls -lh "$FIRMWARE"
@@ -214,7 +226,7 @@ jobs:
           fi
 
       - name: Write the release notes
-        if: success()
+        if: success() && env.PREPARE_ONLY != 'true'
         run: |
           set -eu
           cd "$GITHUB_WORKSPACE"
@@ -264,7 +276,7 @@ jobs:
           cat release-notes.md
 
       - name: Upload images
-        if: success()
+        if: success() && env.PREPARE_ONLY != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: cmcc_rax3000q-nss-main_${{ env.DATE }}
@@ -295,13 +307,31 @@ jobs:
             ${{ env.FIRMWARE }}/sha256sums
           fail_on_unmatched_files: true
 
+      - name: Upload the preparation record
+        # Always, also on success: this is the artifact that answers "which
+        # symbol did defconfig drop" when the job log is gone (a cancelled or
+        # re-run job keeps no log, and that is exactly when it is needed).
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepare-report
+          include-hidden-files: true
+          path: |
+            openwrt/setup-checks.txt
+            openwrt/.config
+            openwrt/feeds-setup.log
+            openwrt/defconfig.log
+          if-no-files-found: ignore
+
       - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
+          include-hidden-files: true
           path: |
             openwrt/logs/**
+            openwrt/setup-checks.txt
             openwrt/.config
             openwrt/feeds-setup.log
             openwrt/defconfig.log

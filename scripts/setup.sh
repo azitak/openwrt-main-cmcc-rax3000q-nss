@@ -125,9 +125,26 @@ grep -E '^CONFIG_TARGET_(BOARD|SUBTARGET|PROFILE)|^CONFIG_TARGET_qualcommax_ipq5
 # or silently wrong when it is missing (an NSS build without wifili links fine
 # and offloads nothing).  The workflow checks the same list; failing here costs
 # seconds, failing there costs a build.
+#
+# Everything printed here also goes to $OW/setup-checks.txt, which the workflow
+# uploads on failure: a job log that is cancelled or lost must not be the only
+# record of why the tree was rejected.
 say "Checking the boot- and offload-critical pieces"
+CHECKS="$OW/setup-checks.txt"
+: > "$CHECKS"
 missing=0
-check() { grep -qx "$1" "$OW/.config" || { echo "  MISSING: $1"; missing=1; }; }
+
+say2file() { printf '%s\n' "$*" | tee -a "$CHECKS"; }
+
+check() {
+    local want=$1
+    if grep -qx "$want" "$OW/.config"; then
+        say2file "  ok       $want"
+    else
+        say2file "  MISSING  $(printf '%-46s' "$want") have: $(grep -E "^${want%%=*}=" "$OW/.config" || echo unset)"
+        missing=1
+    fi
+}
 
 check 'CONFIG_TARGET_qualcommax_ipq50xx_DEVICE_cmcc_rax3000q=y'
 check 'CONFIG_PACKAGE_kmod-qca-dwmac-nss=y'
@@ -148,23 +165,43 @@ for f in \
   "$OW/target/linux/qualcommax/patches-6.18/0810-mtd-spinand-add-support-for-Dosilicon-DS35Q1GA-DS35M1GA.patch" \
   "$OW/package/ipq-wifi-cmcc_rax3000q/Makefile"
 do
-    [ -f "$f" ] || { echo "  MISSING FILE: ${f#$OW/}"; missing=1; }
+    if [ -f "$f" ]; then
+        say2file "  ok       ${f#$OW/}"
+    else
+        say2file "  MISSING  ${f#$OW/}"
+        missing=1
+    fi
 done
 grep -q 'DS35Q1GA' "$OW/target/linux/qualcommax/patches-6.18/0810-*.patch" 2>/dev/null ||
-    { echo "  MISSING: DS35Q1GA in the Dosilicon patch"; missing=1; }
+    { say2file "  MISSING  DS35Q1GA in the Dosilicon patch"; missing=1; }
 grep -q 'nand-ecc-strength = <4>' "$DTS" ||
-    { echo "  MISSING: 4-bit ECC in $DTS"; missing=1; }
+    { say2file "  MISSING  4-bit ECC in $DTS"; missing=1; }
 grep -q 'ubi.mtd=rootfs' "$DTS" ||
-    { echo "  MISSING: ubi.mtd=rootfs in $DTS bootargs-append"; missing=1; }
+    { say2file "  MISSING  ubi.mtd=rootfs in $DTS bootargs-append"; missing=1; }
+
+# Not a check: a per-symbol report of what defconfig did to the seed.  This is
+# what tells a dropped LuCI component from a dropped NSS driver, and it is the
+# reason the file is uploaded when this script exits non-zero.
+say2file ""
+say2file "seed fragment vs .config (DROPPED = kconfig did not keep it):"
+while IFS= read -r want; do
+    case "$want" in \#*|'') continue ;; esac
+    if grep -qx "$want" "$OW/.config"; then
+        say2file "  kept     $want"
+    else
+        say2file "  DROPPED  $(printf '%-46s' "$want") have: $(grep -E "^${want%%=*}=" "$OW/.config" || echo unset)"
+    fi
+done < <(grep -E '^CONFIG_[A-Za-z0-9_-]+=' "$HERE/config/cmcc_rax3000q.config")
 
 if [ "$missing" != 0 ]; then
     echo
     echo "ERROR: the tree is not in the state this project needs." >&2
+    echo "       See $CHECKS (uploaded by the workflow on failure)." >&2
     echo "       A missing file means the base tree moved; a missing symbol means" >&2
     echo "       defconfig dropped it (run RESEED=1 $0 $OW)." >&2
     exit 1
 fi
-echo "  all present"
+say2file "  all present"
 
 say "Ready.  Build with:  cd $OW && make -j\$(nproc)"
 echo "        Pick packages with:  make menuconfig"
