@@ -62,7 +62,7 @@ DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-cmcc_rax3000q
 | `&nss_region` 16 MiB → **8 MiB** | 基线 "256 MB boards"：原厂 MP_256 固件同样只留 8 MiB；驱动把这里的大小当 `heap_ddr_size` 上报，8 MiB 足够满速 |
 | `&q6v5_wcss` / `&wifi` / `&wifi1` → `okay` | 上游把三个节点关掉的原因是 "256M RAM is too small for ath11k"，而它按 512 MB 档位编译。本仓库用 `ATH11K_MEM_PROFILE_256M` + `NSS_MEM_PROFILE_LOW`，这条路在 EX511 v2 / Cudy P5 / AX3000T v2 / RG-MA3063 上验证过（RG-MA3063 同样是 IPQ5018 + QCA8337 + QCN6122） |
 | `ath11k-fw-memory-mode` 1 → **2** | 基线：wifili 在 QCN6122 上需要 mode 2；256 MB 板型两个射频都用 2 |
-| 保留 `bdf-addr` / `m3-dump-addr` | 上游这块板的 Q6 内存布局；与 `qcn6122.dtsi` 里 `q6_region_ipq5018`（0x4c400000）对齐 |
+| `q6_wcss_pd1/pd2` → **`q6v5_wcss` + memory-region** | 基线把 IPQ5018 的 Q6 改成了单 rproc，PD 通过 `boot-args` 选，每个 PD 一个 `no-map` 区；上游那份 DTS 的多 PD 标签已经不存在，`dtc` 会报 `phandle_references: Reference to non-existent node or label "q6_wcss_pd1"`。改成 EX511 v2 / AX3000T v2 那套：新增 `q6_region_qcn6122_1`（0x4d200000, 13 MiB）与 `m3_dump_qcn6122_1`（0x4df00000, 1 MiB），`wifi1` 用 `memory-region`/`memory-region-names`，去掉 `bdf-addr`/`m3-dump-addr` |
 
 **没有改的**：`&gmac1`（sgmii → QCA8337 port0）、`&mdio1` 的四个 PHY 与
 `ethernet-switch@11` 的 DSA 端口映射（wan=port1、lan1=port2、lan2=port4、lan3=port5）、
@@ -148,15 +148,16 @@ CONFIG_NSS_MEM_PROFILE_LOW=y               CONFIG_PACKAGE_ipq-wifi-cmcc_rax3000q
    `phys_if 1: started dev=eth0`。
 4. 两个射频 probe（`iw dev` 看到 `phy0-ap0` / `phy1-ap0`），2.4G 与 5G 都能关联。
 5. WAN DHCP 通、LAN 通、`tcp_accelerated_count` 在跑流量时增长、`top` 里 idle > 90%。
-6. `logread -e nss` 是否出现 "Wi-Fi on the NSS path" —— **本板最不确定的一条**
-   （多 PD 写法 vs 已验证板型的单 rproc 写法）。
+6. `logread -e nss` 是否出现 "Wi-Fi on the NSS path" —— **本板最不确定的一条**：
+   写法与已验证的 256 MB 板型一致，但这块板的 `boot-args`（PD 2、reset GPIO 27）没在
+   真机上验证过。
 7. `sysupgrade -n` 从已运行的 OpenWrt 升级一次，确认 UBI 卷与分区布局没变。
 
 ## 6. 已知风险
 
-- **wifili 未在本板验证**：`q6_wcss_pd2` + `bdf-addr` 是主线这块板的写法，
-  基线的 wifi offload 只在单 rproc 写法的板子上验证过。失败表现为射频留在主机栈，
-  路由不受影响。
+- **wifili 未在本板验证**：单 rproc + PD 2 的写法本身在 GL-B3000 / EX511 v2 / AX3000T v2
+  上跑通过，但这块板的 `boot-args`（PD 2、reset GPIO 27）和 BDF 没在真机上验证。
+  失败表现为射频留在主机栈，路由不受影响。
 - **256 MB 的内存余量本来就紧**：802.11s mesh、多 SSID、USB 存储都会吃内存；
   基线明确说 256m 组不编 mesh offload。
 - **镜像里的 kmod 不能从官方 feed 装**（vermagic 不同）。要什么就加进种子重编。

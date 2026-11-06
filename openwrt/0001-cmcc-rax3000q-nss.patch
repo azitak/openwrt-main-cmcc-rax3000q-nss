@@ -1,5 +1,5 @@
 diff --git a/target/linux/qualcommax/dts/ipq5018-rax3000q.dts b/target/linux/qualcommax/dts/ipq5018-rax3000q.dts
-index 0d88be7..2e95e68 100644
+index 0d88be7..be8a1f3 100644
 --- a/target/linux/qualcommax/dts/ipq5018-rax3000q.dts
 +++ b/target/linux/qualcommax/dts/ipq5018-rax3000q.dts
 @@ -4,6 +4,7 @@
@@ -21,10 +21,31 @@ index 0d88be7..2e95e68 100644
  		stdout-path = "serial0:115200n8";
  	};
  
-@@ -76,6 +79,16 @@
+@@ -76,6 +79,37 @@
  	};
  };
  
++/*
++ * Q6 memory for the 5 GHz user PD: both radios run on one Q6, the second on
++ * PD 2, and each PD needs its own no-map region behind the shared one -
++ * ipq5018-qcn6122.dtsi carries the 2.4 GHz side.  Addresses are the 256 MB
++ * ipq50xx layout (0x4b000000 q6_region, 0x4c400000 PD1, 0x4d200000 PD2,
++ * 0x4df00000 M3 dump), the same one the other 256 MB boards use.
++ */
++/ {
++	reserved-memory {
++		q6_region_qcn6122_1: q6-region-qcn6122-1@4d200000 {
++			reg = <0x0 0x4d200000 0x0 0xd00000>;
++			no-map;
++		};
++
++		m3_dump_qcn6122_1: m3-dump-qcn6122-1@4df00000 {
++			reg = <0x0 0x4df00000 0x0 0x100000>;
++			no-map;
++		};
++	};
++};
++
 +/*
 + * 256 MB board: the stock firmware (AP-MP02.1, MP_256) keeps the NSS
 + * firmware in 8 MiB; ipq5018.dtsi sizes the region for 512 MB boards.
@@ -38,7 +59,7 @@ index 0d88be7..2e95e68 100644
  &sleep_clk {
  	clock-frequency = <32000>;
  };
-@@ -109,13 +122,19 @@
+@@ -109,13 +143,19 @@
  	pinctrl-names = "default";
  	status = "okay";
  
@@ -60,35 +81,59 @@ index 0d88be7..2e95e68 100644
  		nand-bus-width = <8>;
  
  		partitions {
-@@ -318,10 +337,13 @@
+@@ -318,10 +358,37 @@
  	};
  };
  
 -//256M RAM is too small for ath11k, so WiFi is disabled to prevent OOM.
--
 +/*
 + * Both radios are enabled on this port: the image is built for 256 MB
 + * (ATH11K_MEM_PROFILE_256M + NSS_MEM_PROFILE_LOW), which is what makes
 + * ath11k fit here, and mode 2 is the profile the NSS wifili path needs.
 + * Upstream disables them because it ships the 512 MB defaults.
 + */
++&q6v5_wcss {
++	/* The QCN6102 radio should map to UPD ID 2. Without       */
++	/* bootargs, the firmware will expect it to be on UPD ID 3 */
+ 
++	boot-args = </*       type: */ 0x2 /* PCIE1 */
++		     /*     length: */ 4
++		     /*      PD id: */ 2
++		     /* reset GPIO: */ 27
++		     /*   reserved: */ 0 0>;
++
++};
++
++/*
++ * Both radios are enabled on this port: the image is built for 256 MB
++ * (ATH11K_MEM_PROFILE_256M + NSS_MEM_PROFILE_LOW), which is what makes
++ * ath11k fit here, and mode 2 is the profile the NSS wifili path needs.
++ * Upstream disables them because it ships the 512 MB defaults.
++ *
++ * Upstream's own version of this file uses the multi-PD remoteproc labels
++ * (q6_wcss_pd1 / q6_wcss_pd2), which no longer exist in this kernel: the
++ * IPQ5018 Q6 is a single rproc with the user PD selected through boot-args,
++ * and each radio gets its own fixed memory region.  This is the wiring the
++ * branch validates on the other 256 MB boards (EX511 v2, AX3000T v2).
++ */
  &q6v5_wcss {
 -	status = "disabled";
  	/* The QCN6102 radio should map to UPD ID 2. Without       */
  	/* bootargs, the firmware will expect it to be on UPD ID 3 */
  
-@@ -335,22 +357,22 @@
+@@ -335,22 +402,21 @@
  
  &wifi {
  	// IPQ5018
 -	status = "disabled";
 +	status = "okay";
  
- 	qcom,rproc = <&q6_wcss_pd1>;
+-	qcom,rproc = <&q6_wcss_pd1>;
++	qcom,rproc = <&q6v5_wcss>;
  	qcom,calibration-variant = "CMCC-RAX3000Q";
 -	qcom,ath11k-fw-memory-mode = <1>;
+-	qcom,bdf-addr = <0x4c400000>;
 +	qcom,ath11k-fw-memory-mode = <2>;
- 	qcom,bdf-addr = <0x4c400000>;
  };
  
  &wifi1 {
@@ -96,13 +141,17 @@ index 0d88be7..2e95e68 100644
 -	status = "disabled";
 +	status = "okay";
  
- 	qcom,rproc = <&q6_wcss_pd2>;
- 	qcom,userpd-subsys-name = "q6v5_wcss_userpd2";
+-	qcom,rproc = <&q6_wcss_pd2>;
+-	qcom,userpd-subsys-name = "q6v5_wcss_userpd2";
++	qcom,rproc = <&q6v5_wcss>;
  	qcom,calibration-variant = "CMCC-RAX3000Q";
 -	qcom,ath11k-fw-memory-mode = <1>;
+-	qcom,bdf-addr = <0x4d100000>;
+-	qcom,m3-dump-addr = <0x4df00000>;
 +	qcom,ath11k-fw-memory-mode = <2>;
- 	qcom,bdf-addr = <0x4d100000>;
- 	qcom,m3-dump-addr = <0x4df00000>;
++
++	memory-region = <&q6_region_qcn6122_1>, <&q6_region_ipq5018>, <&m3_dump_qcn6122_1>;
++	memory-region-names = "q6-region", "m3-region", "m3-dump";
  };
 diff --git a/target/linux/qualcommax/image/ipq50xx.mk b/target/linux/qualcommax/image/ipq50xx.mk
 index 067d2a5..78c2f3f 100644

@@ -109,7 +109,9 @@ CPU 链路：**QCA8337 port0 --SGMII--> gmac1（`eth0`）**。gmac0（内部 GE 
   - `&nss_region` 从 16 MiB 改成 **8 MiB**（原厂 MP_256 固件同样是 8 MiB，
     省回 8 MB `MemTotal`）；
   - `&q6v5_wcss` / `&wifi` / `&wifi1` 全部 `okay`，`ath11k-fw-memory-mode = <2>`
-    （wifili 需要的档位），保留主线的 `bdf-addr` / `m3-dump-addr` 布局。
+    （wifili 需要的档位）；两个射频改成基线的**单 rproc + 固定内存区**写法
+    （上游那份 DTS 用的 `q6_wcss_pd1`/`q6_wcss_pd2` 标签在这棵树里已经不存在，
+    直接用会让 `dtc` 报 `phandle_references` 错误，构建在最后一步失败）。
 
 ### 2. `openwrt/tree/`（基线没有的文件）
 
@@ -251,8 +253,9 @@ top                     # 满速转发时 idle > 90%
 ## 已知限制（诚实版）
 
 - **Wi-Fi offload 未在 RAX3000Q 上实测。** 有线加速这条路在 GL-B3000（同 SoC、同交换机、
-  同 256M/512M 家族）上验证过；本板的 QCN6102 走 `q6_wcss_pd2`（上游多 PD 写法），
-  与已验证板型（单 rproc 写法）不同。若 wifili 起不来，两个射频会留在主机协议栈上
+  同 256M/512M 家族）上验证过；本板的 QCN6102 与 2.4G 共用同一个 Q6 的 PD 2（单 rproc +
+  `boot-args`，与已验证的 256 MB 板型同构），但 `boot-args` 里的 reset GPIO/PD 组合是这块板
+  自己的。若 wifili 起不来，两个射频会留在主机协议栈上
   （ath11k 的握手失败会打日志），路由不受影响。
 - **`ath11k-fw-memory-mode = 2` + 256M 档位**是这套组合里唯一能在 256 MB 里同时装下
   两个射频和 NSS 的配置；换回 512M 档位会 OOM（上游正是因此在设备树里关掉了 wifi）。
