@@ -88,9 +88,7 @@ DSA port and VLAN a firmware VLAN interface so ECM can write rules for it.
    `nssinfo` works.
 5. `config/cmcc_rax3000q.config` — 256M group, NSS/ECM + wifili, firmware 12.5,
    SQM (off by default), full `wpad-mbedtls`, `luci` + argon + UPnP + four
-   zh_Hans i18n packages, `zram-swap` with the lz4 backend (size defaults to
-   RAM/2, ~124 MiB, tunable via `system.@system[0].zram_size_mb`), and the
-   USTC `VERSION_REPO`.
+   zh_Hans i18n packages, `zram-swap`, and the USTC `VERSION_REPO`.
 6. `scripts/setup.sh` + `.github/workflows/build.yml` — apply all of the above
    to a clean baseline and verify every boot-critical piece before spending 90
    minutes on a build that would produce an unbootable image.

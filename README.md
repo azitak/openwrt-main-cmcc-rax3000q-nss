@@ -210,10 +210,6 @@ SQM（装进镜像但默认关闭）。默认包还包含：
   `miniupnpd`、以及 base/firewall/package-manager/upnp 四个简体中文语言包。
 - **完整 wpad**：`wpad-mbedtls`，并在 `DEVICE_PACKAGES` 里用
   `-wpad-basic-mbedtls` 排除掉默认 basic 变体，为了 802.11v。
-- **zram swap**：`zram-swap` + `kmod-zram`（lz4 后端，对双核 A53 的 CPU 开销
-  最小）。默认容量为内存的一半（约 124 MiB，按需压缩占用），算法显式设为
-  `lz4`（`uci-defaults/17-rax3000q-zram`）；调整容量：
-  `uci set system.@system[0].zram_size_mb='96'`。
 - **apk 镜像源**：`CONFIG_VERSION_REPO` 指向中科大 USTC 的 snapshots。
   清华 TUNA 官方说明「本站不包含 snapshots 镜像」，而本固件是 SNAPSHOT，
   用清华会让 `apk update` 全部 404；USTC 是 OpenWrt 官方 tier-1 镜像，
