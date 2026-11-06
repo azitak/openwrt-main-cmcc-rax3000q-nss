@@ -235,8 +235,9 @@ jobs:
             echo "| \`*-squashfs-factory.ubi\` | first flash from the vendor U-Boot over TFTP: \`tftpboot <pc>:<file>.ubi\` then \`flash rootfs\` |"
             echo "| \`*-squashfs-sysupgrade.bin\` | upgrade a router already running OpenWrt: \`sysupgrade -n <file>\` |"
             echo
-            echo "Default LAN address is **192.168.10.1**; Wi-Fi comes up **open** (no password) as"
-            echo "\`RAX3000Q-2G-XXXX\` / \`RAX3000Q-5G-XXXX\`."
+            echo "Default LAN address is **192.168.1.1**. Both radios probe (\`phy0\`/\`phy1\`), but"
+            echo "\`/etc/config/wireless\` keeps upstream main's default (\`disabled 1\`): enable them"
+            echo "and set an SSID and key in LuCI -> Network -> Wireless."
             echo
             echo "### First boot, what to check"
             echo

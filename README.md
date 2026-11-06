@@ -192,8 +192,24 @@ reset
 nanddump -f art.bin /dev/mtd$(grep '"0:art"' /proc/mtd | cut -d: -f1)
 ```
 
-默认 LAN 地址 **192.168.10.1**。Wi-Fi 默认**开放**（无密码），SSID
-`RAX3000Q-2G-XXXX` / `RAX3000Q-5G-XXXX`；5 GHz 默认 36 信道 / HE160，开机有一次 DFS CAC（约 60 s）。
+默认 LAN 地址 **192.168.1.1**。设备树里两个射频都是 `okay`，驱动会 probe 出
+`phy0` / `phy1`（`iw dev` 能看到两个 wiphy）；但 `/etc/config/wireless` 沿用上游 main
+的默认值——射频是 `disabled 1`，**首次要在 LuCI（网络 → 无线）或 uci 里启用并设
+SSID/密码**：
+
+```
+uci set wireless.radio0.disabled=0
+uci set wireless.radio1.disabled=0
+uci set wireless.default_radio0.ssid='RAX3000Q-2G'
+uci set wireless.default_radio1.ssid='RAX3000Q-5G'
+uci set wireless.default_radio0.encryption='sae-mixed'
+uci set wireless.default_radio0.key='至少八位'
+uci set wireless.default_radio1.encryption='sae-mixed'
+uci set wireless.default_radio1.key='至少八位'
+uci commit wireless && wifi
+```
+
+5 GHz 默认 36 信道 / HE160，开机后第一次起 5G 有一次 DFS CAC（约 60 s）。
 
 ---
 
