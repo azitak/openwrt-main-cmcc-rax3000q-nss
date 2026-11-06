@@ -362,8 +362,11 @@ forbid 'CONFIG_PACKAGE_nss-tools=y'
 # no USB port and a UBIFS rootfs: the subtarget's DEFAULT_PACKAGES must not
 # drag USB + ext4 back in (they auto-load from /etc/modules.d and cost RAM)
 forbid 'CONFIG_PACKAGE_kmod-usb3=y'
+forbid 'CONFIG_PACKAGE_kmod-usb-dwc3=y'
+forbid 'CONFIG_PACKAGE_kmod-usb-dwc3-qcom=y'
 forbid 'CONFIG_PACKAGE_kmod-fs-ext4=y'
 forbid 'CONFIG_PACKAGE_e2fsprogs=y'
+forbid 'CONFIG_PACKAGE_losetup=y'
 
 for f in \
   "$OW/target/linux/qualcommax/patches-6.18/0810-mtd-spinand-add-support-for-Dosilicon-DS35Q1GA-DS35M1GA.patch" \

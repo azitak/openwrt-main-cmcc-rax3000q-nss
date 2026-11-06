@@ -69,14 +69,16 @@ DSA port and VLAN a firmware VLAN interface so ECM can write rules for it.
 
 ## What this repository changes
 
-1. `openwrt/0001-*.patch` + `0002-*.patch` — edits to files the baseline ships:
+1. `openwrt/0001-*.patch` + `0002-*.patch` + `0003-*.patch` — edits to files the
+   baseline ships:
    `image/ipq50xx.mk` (`DEVICE_PACKAGES` gains the ath11k firmware, the board
    BDF, `-wpad-basic-mbedtls -wpad-mbedtls hostapd-mbedtls`, and negatives for
    the subtarget's USB/ext4 DEFAULT_PACKAGES), the board DTS (NSS include,
    4-bit ECC, `ubi.mtd=rootfs`, `coherent_pool=512K`, 8 MiB NSS region, both
    radios `okay` with `ath11k-fw-memory-mode = <2>` and the baseline's single
-   rproc wiring), two `cmcc,rax3000q` caldata cases, and `PKG_FIXUP:=autoreconf`
-   in libnftnl for the fullcone patch.
+   rproc wiring), two `cmcc,rax3000q` caldata cases, `PKG_FIXUP:=autoreconf`
+   in libnftnl for the fullcone patch, and the kernel config trim (no JFFS2,
+   no BPF syscall/JIT - unused on this board).
 2. `openwrt/tree/` — files the baseline lacks: the Dosilicon backport, the
    board's BDF package, and the SONiC fullcone NAT kernel/userspace patches.
 3. `openwrt/feeds/` — the `luci-app-firewall` fullcone UI patch and zh_Hans

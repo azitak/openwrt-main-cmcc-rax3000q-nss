@@ -96,10 +96,11 @@ CPU 链路：**QCA8337 port0 --SGMII--> gmac1（`eth0`）**。gmac0（内部 GE 
 
 下面六类，全部可审：
 
-### 1. `openwrt/0001-*.patch` / `0002-*.patch`（改基线已有的文件）
+### 1. `openwrt/0001-*.patch` / `0002-*.patch` / `0003-*.patch`（改基线已有的文件）
 
 0001 改 `ipq50xx.mk`、板级 DTS 和 `11-ath11k-caldata` 三个文件；0002 给
-`package/libs/libnftnl/Makefile` 加 `PKG_FIXUP:=autoreconf`（fullcone 补丁需要）。
+`package/libs/libnftnl/Makefile` 加 `PKG_FIXUP:=autoreconf`（fullcone 补丁需要）；
+0003 裁掉内核里用不到的 built-in（JFFS2、BPF syscall/JIT，省约 0.6-0.8 MiB）。
 
 - `target/linux/qualcommax/image/ipq50xx.mk`
   `Device/cmcc_rax3000q` 补上 `DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122
