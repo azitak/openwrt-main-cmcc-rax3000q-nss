@@ -15,8 +15,8 @@ things upstream does not give you:
    `DEVICE_PACKAGES` (no ath11k firmware, no board BDF) and both wifi nodes are
    `disabled`, because it assumes the 512 MB memory defaults. This is a 256 MB
    board.
-3. **Wired forwarding inside the NSS core** (Wi-Fi offload is built but not
-   validated on this board yet), following the NSS port
+3. **Wired forwarding inside the NSS core** (Wi-Fi offload is built and
+   validated on this board), following the NSS port
    of [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss)
    for the same SoC and the same switch.
 
@@ -175,12 +175,13 @@ board's wiring, not the offload.
 
 ## Known limits
 
-- **Wi-Fi offload is not validated on this board** (the wired path is, on the
-  GL-B3000 — same SoC, same switch). Both radios use the baseline's single
-  rproc + fixed memory regions, which is the idiom validated on the 256 MB
-  boards, but this board's own `boot-args` (PD 2, reset GPIO 27) and BDF have
-  not been exercised on hardware. If wifili fails, the radios stay on the host
-  path; routing is unaffected.
+- **Wi-Fi offload (wifili) is validated on this board** (5 GHz HE160
+  association, traffic on the NSS path). Two things to keep in mind: mode 2 +
+  the 256M profile reduces how many VDEVs/peers the firmware may create (patch
+  `903`, paired with `ATH11K_MEM_PROFILE_256M` so both radios and the NSS core
+  fit in 256 MB; upstream compiles for 512 MB and therefore ships wifi off), and
+  if wifili fails to come up the radios stay on the host path — routing is
+  unaffected.
 - sysupgrade follows upstream main (`elecom_upgrade_prepare` group); it has not
   been run on hardware here.
 - kmods not in the image cannot be installed from the official feeds (kernel

@@ -39,7 +39,7 @@ base：OpenWrt main 2026-10-09（JuliusBairaktaris nss-edma-rework 的 vendor-ns
 
 ## 3. 逐文件
 
-### 3.1 `openwrt/0001-cmcc-rax3000q-nss.patch`（2 个文件）
+### 3.1 `openwrt/0001-cmcc-rax3000q-nss.patch`（3 个文件）
 
 `target/linux/qualcommax/image/ipq50xx.mk`
 
@@ -67,6 +67,10 @@ DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 ipq-wifi-cmcc_rax3000q
 **没有改的**：`&gmac1`（sgmii → QCA8337 port0）、`&mdio1` 的四个 PHY 与
 `ethernet-switch@11` 的 DSA 端口映射（wan=port1、lan1=port2、lan2=port4、lan3=port5）、
 按键/LED/串口引脚、`qcom,smem-part` 分区。这些都来自上游对这块板的支持，是对的。
+
+第三个文件是 `11-ath11k-caldata` 的两条 raw extract 规则（第二轮补上，见 5b）：
+`cmcc,rax3000q` 命中后从 `0:art` 提取 2.4G（`0x1000`）与 5G（`0x26800`）的
+cal blob，各 128 KiB，不做 MAC/regdomain patch（patch 会触发固件断言）。
 
 ### 3.2 `openwrt/tree/target/linux/qualcommax/patches-6.18/0810-…Dosilicon….patch`
 
@@ -126,8 +130,10 @@ CONFIG_NSS_MEM_PROFILE_LOW=y               CONFIG_PACKAGE_ipq-wifi-cmcc_rax3000q
                                            CONFIG_PACKAGE_ath11k-firmware-ipq5018-qcn6122=y
 ```
 
-加上文件存在性、Dosilicon 补丁含 `DS35Q1GA`、DTS 含 `nand-ecc-strength = <4>` /
-`ubi.mtd=rootfs` / `ipq5018-nss.dtsi`。
+加上文件存在性、Dosilicon 补丁内容（`DS35Q1GA` / 厂商 ID）、DTS 的
+4-bit ECC / `ubi.mtd=rootfs` / NSS include、caldata 两条规则与偏移、
+11k/v/r 选项、USTC 源、fullcone 默认开启、nssinfo feed 补丁、LuCI 与中文包，
+并显式禁止 `wpad-basic-mbedtls` / `nss-tools` 被选回。完整清单以 `setup.sh` 为准。
 
 ## 4. 本地已经验证的
 
@@ -176,7 +182,7 @@ URL（`CONFIG_FEED_nss=m` 修）；`nssinfo` 全组 `-22` 是 `qca-nss-netlink.k
 （`led-failsafe=blue`、`led-upgrade=blue`、`led-boot=red`、运行中=`green:wan`），
 绿灯有 netdev trigger 且链路 up 时亮，属正常。
 
-## 5b. 第二轮（本轮）改动与待确认
+## 5b. 第二轮改动与待确认
 
 - caldata 两条 raw-extract 规则、`files/` 四个文件、`CONFIG_FEED_nss=m`、
   `check-dts-labels.py` 早期闸门；修复清单见 README 第 2b 节。
@@ -266,9 +272,10 @@ workflow release-notes 里"fullcone 默认关闭""尚未编译验证"等过期�
 
 ## 6. 已知风险
 
-- **wifili 未在本板验证**：单 rproc + PD 2 的写法本身在 GL-B3000 / EX511 v2 / AX3000T v2
-  上跑通过，但这块板的 `boot-args`（PD 2、reset GPIO 27）和 BDF 没在真机上验证。
-  失败表现为射频留在主机栈，路由不受影响。
+- **wifili 已在本板验证**（5G HE160 关联、流量走 NSS 路径）：单 rproc + PD 2 的
+  写法连同这块板自己的 `boot-args`（PD 2、reset GPIO 27）和 BDF 都已真机跑通。
+  余量相关的提醒：256 MB 内存档位下 VDEV/peer 数量受 mode 2 限制；若 wifili
+  起不来，射频留在主机栈，路由不受影响。
 - **256 MB 的内存余量本来就紧**：802.11s mesh、多 SSID、USB 存储都会吃内存；
   基线明确说 256m 组不编 mesh offload。
 - **fullcone NAT 与 NSS/ECM 组合**：基本共存已实测正常（规则、连通性、ECM 计数），

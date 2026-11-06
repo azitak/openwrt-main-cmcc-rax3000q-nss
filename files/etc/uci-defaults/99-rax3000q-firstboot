@@ -11,9 +11,8 @@
 #
 # Fix all three here, at the end of uci-defaults (the 99- prefix), so a
 # kept-config upgrade ends up in the same state as a clean factory flash.
-# This script is
-# removed by /etc/init.d/boot after it succeeds, and reappears with every new
-# image, so it runs again on the next upgrade.
+# This script is removed by /etc/init.d/boot after it succeeds, and comes
+# back with every new image, so it runs again on the next upgrade.
 . /lib/functions.sh
 
 # ---------------------------------------------------------------- wireless

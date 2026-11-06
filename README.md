@@ -11,7 +11,7 @@
 2. **两块射频能起来** —— 主线虽然已经支持这块板（`Device/cmcc_rax3000q`），但它的
    `DEVICE_PACKAGES` 是空的，镜像里既没有 ath11k 固件也没有板级 BDF，而且设备树里
    两个 wifi 节点是 `disabled`（上游按 512 MB 的默认值考虑，256 MB 装不下）。
-3. **有线转发进 NSS 核**（Wi-Fi offload 的代码与配置也编进镜像，但**未在本板实测**）—— 参照
+3. **有线转发进 NSS 核**（Wi-Fi offload 也编进镜像并在真机验证通过）—— 参照
    [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss)
    在 PZ-L8（同 SoC、同交换机）上跑通的 NSS 方案，在 main 上落成当前唯一可行的那条路：
    **保留上游 stmmac 驱动，用一小块 glue 模块把 GMAC 的数据面交给 NSS 固件**。
@@ -210,6 +210,7 @@ SQM（装进镜像但默认关闭）。默认包还包含：
   `miniupnpd`、以及 base/firewall/package-manager/upnp 四个简体中文语言包。
 - **完整 wpad**：`wpad-mbedtls`，并在 `DEVICE_PACKAGES` 里用
   `-wpad-basic-mbedtls` 排除掉默认 basic 变体，为了 802.11v。
+- **`zram-swap`**：压缩交换分区，默认容量为内存一半（约 124 MiB）。
 - **apk 镜像源**：`CONFIG_VERSION_REPO` 指向中科大 USTC 的 snapshots。
   清华 TUNA 官方说明「本站不包含 snapshots 镜像」，而本固件是 SNAPSHOT，
   用清华会让 `apk update` 全部 404；USTC 是 OpenWrt 官方 tier-1 镜像，
@@ -363,14 +364,12 @@ top                     # 满速转发时 idle > 90%
 
 ## 已知限制（诚实版）
 
-- **Wi-Fi offload 未在 RAX3000Q 上实测。** 有线加速这条路在 GL-B3000（同 SoC、同交换机、
-  同 256M/512M 家族）上验证过；本板的 QCN6102 与 2.4G 共用同一个 Q6 的 PD 2（单 rproc +
-  `boot-args`，与已验证的 256 MB 板型同构），但 `boot-args` 里的 reset GPIO/PD 组合是这块板
-  自己的。若 wifili 起不来，两个射频会留在主机协议栈上
-  （ath11k 的握手失败会打日志），路由不受影响。
-- **`ath11k-fw-memory-mode = 2` + 256M 档位**：mode 2 会进一步减少固件可创建的
-  VDEV/peer 数量以省内存（补丁 `903`），配合 `ATH11K_MEM_PROFILE_256M` 才能在 256 MB
-  里同时容纳两个射频与 NSS；上游按 512 MB 档位编译，因此把 wifi 关掉了。
+- **Wi-Fi offload（wifili）已在真机验证**：5G HE160 关联成功、流量走 NSS 路径
+  （`logread -e nss` 的 "Wi-Fi on the NSS path"）。留意两点：mode 2 + 256M 档位
+  会减少固件可创建的 VDEV/peer 数量（补丁 `903`，配合 `ATH11K_MEM_PROFILE_256M`
+  才能在 256 MB 里同时容纳两个射频与 NSS；上游按 512 MB 档位编译，因此把 wifi
+  关掉了）；若 wifili 起不来，两个射频会留在主机协议栈上（ath11k 的握手失败会
+  打日志），路由不受影响。
 - **sysupgrade 用的是上游 main 的路径**（`cmcc,rax3000q` 与 PZ-L8 同组，
   `elecom_upgrade_prepare` + `nand_do_upgrade`）。上一代项目为了兼容原厂 U-Boot
   改成过 `CI_UBIPART="rootfs"`；本仓库跟随上游。首版镜像已由用户通过 U-Boot TFTP

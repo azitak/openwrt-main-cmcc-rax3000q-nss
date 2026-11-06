@@ -255,7 +255,7 @@ jobs:
             echo "OpenWrt **main** with Qualcomm **NSS** offload for the **CMCC RAX3000Q / RAX3000-QY**."
             echo
             echo "The wired path is offloaded into the NSS core of the SoC; Wi-Fi offload (wifili) is"
-            echo "built into the image but NOT validated on this board yet. The switch keeps its DSA"
+            echo "built in and validated on this board. The switch keeps its DSA"
             echo "driver and is spoken to in plain 802.1Q (\`qca-8021q\` tagger), so \`lan1\`-\`lan3\`"
             echo "and \`wan\` stay the interfaces they are on a stock image. Kernel 6.18, built for"
             echo "256 MB (ath11k 256M + NSS LOW). Fullcone NAT (on by default) and LuCI/Argon/UPnP"
