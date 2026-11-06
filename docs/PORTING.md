@@ -185,6 +185,54 @@ URL（`CONFIG_FEED_nss=m` 修）；`nssinfo` 全组 `-22` 是 `qca-nss-netlink.k
   `apk update` 干净、`nssinfo` 不再报 `-22`、sysupgrade 保留配置后
   `99-rax3000q-firstboot` 能从 `/rom` 恢复无线配置、补回 rc.local 的 netlink 加载行。
 
+## 5c. 第三轮：apk 源 / 默认包 / fullcone / 11k/v/r
+
+**真机实测 802.11k/v/r**（`hostapd -t` 逐项加 hostapd 原生键，不是 uci 键——
+`ieee80211k` / `ieee80211r` 是 wifi-scripts 的转换键，直接写给 hostapd 会误报
+`unknown configuration item`）：
+
+| 键 | 首版 `wpad-basic-mbedtls` | 结论 |
+|---|---|---|
+| `rrm_neighbor_report` / `rrm_beacon_report` | accepted | 11k 本来就有 |
+| `bss_transition` / `wnm_sleep_mode` | **unknown** | 11v 缺失，须换 full wpad |
+| `mobility_domain` / `ft_over_ds` / `ft_psk_generate_local` | accepted | 11r 本来就有 |
+
+之前 README 写"basic 不支持 11k/v 和 11r"是错的，已更正。修复为
+`DEVICE_PACKAGES += -wpad-basic-mbedtls wpad-mbedtls`（负号语法由
+`include/image.mk` 的 `merge_packages` 与 `scripts/target-metadata.pl` 支持，
+ath79 多处现成用例），wireless 配置里补齐 11k/11v/11r 选项。
+wifi-scripts `iface_roaming()` 有 `if (!ieee80211r || wpa < 2) return`，
+所以保持开放网络时 11r 惰性、加密码后自动生效（用户选择保持开放）。
+
+**apk 源**：TUNA 帮助页原文「本站不包含 snapshots 镜像」，实测其
+`snapshots/*` 全 404，而本固件是 SNAPSHOT。改用 USTC（官方 tier-1，
+四个索引实测 200）。坑：`CONFIG_VERSION_REPO` 定义在
+`package/base-files/image-config.in` 的 `menuconfig VERSIONOPT` 里，而
+`VERSIONOPT` / `IMAGEOPT` 都默认 n，不开这两个 defconfig 会静默丢弃它；
+故同时设 `CONFIG_IMAGEOPT=y` `CONFIG_VERSIONOPT=y`，并用
+`files/etc/apk/repositories.d/distfeeds.list` 直接覆盖生成文件作双保险。
+`keep.d/base-files-essential` 不含 apk 源，sysupgrade 不会把旧源带回来。
+
+**默认包**：`luci` 元包实测只依赖 `luci-light` + `luci-app-package-manager`，
+之前注释里"会拉 luci-app-nss / nss-tools 冲突"是错的——那个 feed 里没有
+`luci-app-nss`，且 `nss-tools` 在 ipq50xx 上是 `@BROKEN`。已加 `luci`、
+`luci-theme-argon`（jerrykuku master，有 ucode 模板、`PKG_RELEASE=20261106`，
+作为 `argon` feed）、`luci-app-upnp` + `miniupnpd`、四个 zh_Hans 语言包。
+bootstrap 保持默认主题，argon 只作为可选项。
+
+**SONiC fullcone NAT**：`mufeng05/openwrt-sonic-fullcone`（内核 6.18 支持）。
+10 个补丁文件 + `0002-sonic-fullcone-libnftnl.patch`（`PKG_FIXUP:=autoreconf`）
++ LuCI feed 补丁与中文翻译。四个内核补丁（984/985/986/987）已在
+torvalds/linux v6.18 的对应文件上逐个 `patch` 验证 rc=0；LuCI 的
+`zones.js` 补丁也对 luci master `patch --dry-run` 通过。默认 `fullcone=0`，
+不影响 NSS/ECM；与硬件加速同时开启的组合**未在本板实测**。
+
+**本地验证**：`bash -n setup.sh`、两个 git 补丁 `apply --check`、
+把 setup.sh 第 5 节抽出来在构造好的树上干跑（补上 defconfig 才会派生的
+4 个 kmod 符号后）→ 全部 `ok`、无 MISSING/FORBIDDEN。
+**仍待一次真实构建验证**：内核补丁在打过 OpenWrt/NSS 补丁的完整内核树上
+能否全部应用、argon feed 拉取、fullcone 用户态编译、LuCI 补丁在完整 feed 上应用。
+
 ## 6. 已知风险
 
 - **wifili 未在本板验证**：单 rproc + PD 2 的写法本身在 GL-B3000 / EX511 v2 / AX3000T v2
@@ -192,5 +240,8 @@ URL（`CONFIG_FEED_nss=m` 修）；`nssinfo` 全组 `-22` 是 `qca-nss-netlink.k
   失败表现为射频留在主机栈，路由不受影响。
 - **256 MB 的内存余量本来就紧**：802.11s mesh、多 SSID、USB 存储都会吃内存；
   基线明确说 256m 组不编 mesh offload。
+- **fullcone NAT 与 NSS/ECM 的组合未实测**：ECM 把已建立连接交给固件转发，
+  后续 conntrack 处理（含 fullcone 的 3 元组映射）可能被绕过；要验证 EIM/EIF
+  效果先关 `nss.general.enabled`。fullcone 默认关闭，不影响正常加速路径。
 - **镜像里的 kmod 不能从官方 feed 装**（vermagic 不同）。要什么就加进种子重编。
 - 首次刷入需要 U-Boot TFTP；原厂 `bootipq` 的 A/B 槽未改动，另一槽仍可回退。

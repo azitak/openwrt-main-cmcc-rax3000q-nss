@@ -142,18 +142,60 @@ WMI 永远不 ready（上一版 25.12 在真机上踩过）。
 
 | 文件 | 作用 |
 |---|---|
-| `etc/config/wireless` | 两个射频开机即启用，SSID `RAX3000Q-2G/-5G`，开放网络，country CN，2.4G HE40 / 5G HE160 |
+| `etc/config/wireless` | 两个射频开机即启用，SSID `RAX3000Q-2G/-5G`，开放网络，country CN，2.4G HE40 / 5G HE160；带完整的 11k / 11v / 11r 选项（11r 需加密，见下文） |
+| `etc/apk/repositories.d/distfeeds.list` | 覆盖构建时生成的源列表，指向中科大 USTC 镜像 |
 | `etc/uci-defaults/99-rax3000q-firstboot` | 从首版镜像**保留配置** sysupgrade 时，`/etc/config/wireless`（0 字节）和 `/etc/rc.local` 都在 `keep.d/base-files-essential` 里，会被旧版盖住新文件；脚本从 `/rom` 恢复无线配置、按运行时 sysfs 校正 radio path，并补回 rc.local 里的 netlink 加载行 |
 | `etc/rc.local` | 开机末段 `modprobe qca-nss-netlink`。这个 kmod 故意没有 `AUTOLOAD`（放 `/etc/modules.d` 会让 kmodloader 在 NSS 服务 arm 端口之前把 `qca-nss-drv` 拉起来）；不加载它 `nssinfo` 的每个 netlink mcast group 都报 `-22`，而数据面转发本身完全正常 |
+
+### 2c. SONiC fullcone NAT（`openwrt/tree/` 的内核与用户态补丁）
+
+来自 `mufeng05/openwrt-sonic-fullcone`（SONiC / Broadcom 的 conntrack
+`nat_by_manip_src` 3 元组哈希方案），不是 `xt_FULLCONENAT` 那种独立内核模块：
+功能直接编译进 `nf_nat` / `nft_masq` / `xt_MASQUERADE`，per-rule 开关，
+非 fullcone 流量零开销。支持内核 6.6 / 6.12 / **6.18**，四个内核补丁
+（984/985/986/987）已在 Linux 6.18 源码上逐个 `patch` 验证过能干净应用。
+整套补丁清单：
+
+| 位置 | 内容 |
+|---|---|
+| `target/linux/generic/hack-6.18/984..987-*` | 内核：conntrack 3 元组哈希、iptables / nftables 的 fullcone 表达式、竞态与丢包修复 |
+| `package/libs/libnftnl`, `package/network/utils/nftables`, `.../iptables` | 用户态 `fullcone` 表达式/关键字；`0002-*.patch` 给 libnftnl 加 `PKG_FIXUP:=autoreconf` |
+| `package/network/config/firewall4/patches` | fw4 生成 `fullcone` 规则、读 `defaults.fullcone` 总开关与 zone 级开关 |
+| `openwrt/feeds/luci-app-firewall/` | LuCI 原生防火墙页面的 Fullcone 复选框 + 中文翻译，由 `setup.sh` 在 `feeds install` 之后装进 luci feed |
+
+**默认关闭**（`firewall.@defaults[0].fullcone=0`），所以不影响 NSS/ECM 硬件加速。
+启用：
+
+```sh
+uci set firewall.@defaults[0].fullcone='1'
+uci set firewall.@zone[1].fullcone='1'      # wan
+uci commit firewall && /etc/init.d/firewall restart
+nft list ruleset | grep fullcone
+```
+
+⚠️ NSS/ECM 会把已建立连接交给固件转发，绕过后续 conntrack 处理；本板**未实测**
+二者同时开启时的 EIM/EIF 行为。要验证 fullcone 效果，建议先
+`uci set nss.general.enabled='0'; uci commit nss; reboot`，测完再打开。
 
 ### 3. `config/cmcc_rax3000q.config`（kconfig 种子）
 
 `Device/cmcc_rax3000q` 单设备 + 256M 档位（`ATH11K_MEM_PROFILE_256M=y`、
 `NSS_MEM_PROFILE_LOW=y`）+ `nss-tools-dwmac` + Wi-Fi offload + 12.5 固件 +
-SQM（装进镜像但默认关闭）+ LuCI（NSS 树自带的镜像不带 LuCI，本仓库带上并加中文）。
-另外 `CONFIG_FEED_nss=m`：nss feed 是本项目的本地 feed，官方下载站没有它的 index，
-若让它以 `y` 生成 `/etc/apk/repositories` 条目，`apk update` 每台机器都会报
-`1 unavailable`。tristate `m` 只把这一行注释掉，包照常编译进镜像。
+SQM（装进镜像但默认关闭）。默认包还包含：
+
+- **LuCI**：`luci` 元包、`luci-theme-argon`（第三方，由 `setup.sh` 加 `argon` feed；
+  bootstrap 仍是默认主题，主题坏了也不会拖垮 Web UI）、`luci-app-upnp` +
+  `miniupnpd`、以及 base/firewall/package-manager/upnp 四个简体中文语言包。
+- **完整 wpad**：`wpad-mbedtls`，并在 `DEVICE_PACKAGES` 里用
+  `-wpad-basic-mbedtls` 排除掉默认 basic 变体，为了 802.11v。
+- **apk 镜像源**：`CONFIG_VERSION_REPO` 指向中科大 USTC 的 snapshots。
+  清华 TUNA 官方说明「本站不包含 snapshots 镜像」，而本固件是 SNAPSHOT，
+  用清华会让 `apk update` 全部 404；USTC 是 OpenWrt 官方 tier-1 镜像，
+  四个索引都实测 200。`CONFIG_IMAGEOPT=y` + `CONFIG_VERSIONOPT=y` 是必需的：
+  `VERSION_REPO` 藏在这两个 menuconfig 下面，不开它们 defconfig 会静默丢弃。
+  `files/etc/apk/repositories.d/distfeeds.list` 是第二重保障（直接覆盖生成文件）。
+- `CONFIG_FEED_nss=m` / `CONFIG_FEED_argon=m`：两个本地 feed 官方镜像站没有
+  index，tristate `m` 只把它们的 repository 行注释掉，包照常编译进镜像。
 
 ### 4. `scripts/setup.sh` + `.github/workflows/build.yml`
 
@@ -237,9 +279,20 @@ uci set wireless.default_radio1.key='至少八位'
 uci commit wireless && wifi reload
 ```
 
-镜像里是 `wpad-basic-mbedtls`：支持 WPA2 / WPA3-SAE / OWE / 802.11r / 802.11w，
-**不支持 802.11k/v 和 mesh**（配置里写了 `rrm_neighbor_report` 之类，hostapd 会
-直接拒绝，两个射频一起起不来）。需要 11k/v 就 `apk add wpad-mbedtls` 替换掉它。
+镜像里是**完整版** `wpad-mbedtls`（不是 basic）。这是在真机上用
+`hostapd -t` 逐项实测后换的：
+
+| 能力 | `wpad-basic-mbedtls`（首版） | 本版 `wpad-mbedtls` |
+|---|---|---|
+| 802.11k RRM | ✅ `rrm_neighbor_report` / `rrm_beacon_report` 接受 | ✅ |
+| 802.11v WNM | ❌ `bss_transition` / `wnm_sleep_mode` 报 `unknown configuration item` | ✅ |
+| 802.11r FT | ✅ `mobility_domain` / `ft_over_ds` / `ft_psk_generate_local` 接受 | ✅ |
+| mesh / 11w / SAE / OWE / DPP | 部分 | ✅ 全量 |
+
+配置里 11k / 11v / 11r 选项都已写好。**11r 需要加密**：wifi-scripts 的
+`iface_roaming()` 在 `wpa < 2` 时直接返回，所以开放网络下 `ieee80211r` 是
+惰性的；按上面设了密码后，FT-PSK / FT-SAE 会自动生效，无需再改别的。
+11k 和 11v 在开放网络下就已经生效。
 
 5 GHz 默认 36 信道 / HE160、country `CN`；这一段覆盖 DFS，开机第一次起 5G
 有一次约 60 s 的 CAC，之后才发信标。想去掉等待就改成 `HE80`。

@@ -45,6 +45,18 @@ if [ "$restored" = 1 ]; then
     uci commit wireless
 fi
 
+# ---------------------------------------------------------------- apk mirror
+# A kept-config upgrade can also carry an edited distfeeds.list (the old image
+# shipped downloads.openwrt.org).  Restore the USTC mirror from /rom if it is
+# not there, so `apk update` works after upgrading too.
+dist=/etc/apk/repositories.d/distfeeds.list
+romdist=/rom/etc/apk/repositories.d/distfeeds.list
+if [ -s "$romdist" ] && ! grep -q 'mirrors.ustc.edu.cn' "$dist" 2>/dev/null; then
+    mkdir -p "$(dirname "$dist")"
+    cp "$romdist" "$dist"
+    logger -t rax3000q-firstboot "restored the USTC apk mirror from /rom"
+fi
+
 # ------------------------------------------------------------- nss-netlink
 # qca-nss-netlink has no AUTOLOAD on purpose: /etc/modules.d would make
 # kmodloader pull qca-nss-drv in before the nss service arms a port.  Loading

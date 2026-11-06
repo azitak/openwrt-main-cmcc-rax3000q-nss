@@ -1,0 +1,242 @@
+From: openwrt-sonic-fullcone contributors
+Date: Wed, 9 Apr 2026 00:00:00 +0000
+Subject: [PATCH] firewall4: add SONiC fullcone NAT with per-zone and
+ per-protocol granularity
+
+Adds fullcone NAT support to firewall4 with three levels of control:
+
+  1. Global default:  config defaults / option fullcone 1
+  2. Per-zone:        config zone / option fullcone 1
+  3. Per-protocol:    config zone / list fullcone_proto udp
+
+defaults.fullcone is a global gate. When off, all fullcone is disabled.
+When on, each zone must explicitly set fullcone=1 to activate.
+
+Requires the fullcone expression in nft_masq.ko (from the
+986-add-sonic-fullcone-to-nft patch) and the corresponding
+libnftnl/nftables userspace patches.
+
+Fullcone covers TCP, UDP, UDP-Lite, SCTP and DCCP, the protocols with
+ports, or the subset fullcone_proto lists; other traffic keeps ordinary
+masquerading. In srcnat each fullcone rule takes the zone's masq_src and
+masq_dest restrictions and is followed by the masquerade rule with the
+same restrictions. SNAT rules map to ports 1024-65535; DNAT rules carry
+no range and no address restrictions.
+---
+ root/usr/share/firewall4/templates/ruleset.uc       | 12 ++
+ root/usr/share/firewall4/templates/zone-fullcone.uc | 35 ++++++
+ root/usr/share/ucode/fw4.uc                         | 89 ++++++++++++++-
+ 3 files changed, 135 insertions(+), 1 deletion(-)
+
+--- a/root/usr/share/firewall4/templates/ruleset.uc
++++ b/root/usr/share/firewall4/templates/ruleset.uc
+@@ -333,6 +333,12 @@ table inet fw4 {
+ {%   for (let redirect in fw4.redirects(`dstnat_${zone.name}`)): %}
+ 		{%+ include("redirect.uc", { fw4, zone, redirect }) %}
+ {%   endfor %}
++{%   if (zone.masq && zone.fullcone): %}
++		{%+ include("zone-fullcone.uc", { fw4, zone, family: 4, direction: "dstnat" }) %}
++{%   endif %}
++{%   if (zone.masq6 && zone.fullcone6): %}
++		{%+ include("zone-fullcone.uc", { fw4, zone, family: 6, direction: "dstnat" }) %}
++{%   endif %}
+ {%   fw4.includes('chain-append', `dstnat_${zone.name}`) %}
+ 	}
+ 
+@@ -346,6 +352,9 @@ table inet fw4 {
+ {%   if (zone.masq): %}
+ {%    for (let saddrs in zone.masq4_src_subnets): %}
+ {%     for (let daddrs in zone.masq4_dest_subnets): %}
++{%      if (zone.fullcone): %}
++		{%+ include("zone-fullcone.uc", { fw4, zone, family: 4, direction: "srcnat", saddrs, daddrs }) %}
++{%      endif %}
+ 		{%+ include("zone-masq.uc", { fw4, zone, family: 4, saddrs, daddrs }) %}
+ {%     endfor %}
+ {%    endfor %}
+@@ -353,6 +362,9 @@ table inet fw4 {
+ {%   if (zone.masq6): %}
+ {%    for (let saddrs in zone.masq6_src_subnets): %}
+ {%     for (let daddrs in zone.masq6_dest_subnets): %}
++{%      if (zone.fullcone6): %}
++		{%+ include("zone-fullcone.uc", { fw4, zone, family: 6, direction: "srcnat", saddrs, daddrs }) %}
++{%      endif %}
+ 		{%+ include("zone-masq.uc", { fw4, zone, family: 6, saddrs, daddrs }) %}
+ {%     endfor %}
+ {%    endfor %}
+--- /dev/null
++++ b/root/usr/share/firewall4/templates/zone-fullcone.uc
+@@ -0,0 +1,35 @@
++{# /usr/share/firewall4/templates/zone-fullcone.uc
++   direction: "srcnat" or "dstnat"
++   saddrs, daddrs: masquerading restrictions, srcnat only
++
++   Fullcone covers the protocols in zone.fullcone_proto, which fw4.uc keeps
++   to those with ports, the only ones the kernel can key a mapping by. In
++   srcnat the rule takes the same address restrictions as the masquerade
++   rule zone-masq.uc emits right after it, which handles all other traffic.
++   dstnat takes none: it only follows existing mappings, which for these
++   protocols the srcnat fullcone rule sets up.
++
++   The srcnat port range keeps translated ports out of the privileged
++   range, and the SONiC patch enforces 3-tuple uniqueness only for rules
++   that have one.
++
++   The set is joined here rather than with fw4.set(): that quotes anything
++   that is not an address, and nft does not resolve a quoted protocol name.
++ -#}
++{%
++	let l4 = map(zone.fullcone_proto, (name) => fw4.l4proto(family, { name }));
++	let snat = (direction == "srcnat");
++-%}
++meta nfproto {{ fw4.nfproto(family) }} {%+ if (snat && saddrs && saddrs[0]): -%}
++	{{ fw4.ipproto(family) }} saddr {{ fw4.set(map(saddrs[0], fw4.cidr)) }} {%+ endif -%}
++{%+ if (snat && saddrs && saddrs[1]): -%}
++	{{ fw4.ipproto(family) }} saddr != {{ fw4.set(map(saddrs[1], fw4.cidr)) }} {%+ endif -%}
++{%+ for (let a in (snat && saddrs ? saddrs[2] : [])): -%}
++	{{ fw4.ipproto(family) }} saddr & {{ a.mask }} {{ a.invert ? '!=' : '==' }} {{ a.addr }} {%+ endfor -%}
++{%+ if (snat && daddrs && daddrs[0]): -%}
++	{{ fw4.ipproto(family) }} daddr {{ fw4.set(map(daddrs[0], fw4.cidr)) }} {%+ endif -%}
++{%+ if (snat && daddrs && daddrs[1]): -%}
++	{{ fw4.ipproto(family) }} daddr != {{ fw4.set(map(daddrs[1], fw4.cidr)) }} {%+ endif -%}
++{%+ for (let a in (snat && daddrs ? daddrs[2] : [])): -%}
++	{{ fw4.ipproto(family) }} daddr & {{ a.mask }} {{ a.invert ? '!=' : '==' }} {{ a.addr }} {%+ endfor -%}
++meta l4proto {{ length(l4) > 1 ? "{ " + join(", ", l4) + " }" : l4[0] }} fullcone{{ snat ? " to :1024-65535" : "" }} comment "!fw4: {{ zone.name }} {{ fw4.nfproto(family, true) }} fullcone NAT {{ direction }}"
+--- a/root/usr/share/ucode/fw4.uc
++++ b/root/usr/share/ucode/fw4.uc
+@@ -503,6 +503,32 @@ function nft_try_hw_offload(devices) {
+ 	return (rc == 0);
+ }
+ 
++/* Protocols the kernel can key a fullcone mapping by: those with ports. */
++const FULLCONE_PROTOS = [ "tcp", "udp", "udplite", "sctp", "dccp" ];
++
++function nft_try_fullcone() {
++	/* Probe the forms zone-fullcone.uc emits. srcnat carries a port range,
++	 * and a kernel that has the expression but not its range attributes
++	 * should turn fullcone off here rather than fail the whole ruleset. */
++	let nft_test =
++		'add table inet fw4-fullcone-test; ' +
++		'add chain inet fw4-fullcone-test dstnat { ' +
++			'type nat hook prerouting priority -100; policy accept; ' +
++			'fullcone; ' +
++		'}; ' +
++		'add chain inet fw4-fullcone-test srcnat { ' +
++			'type nat hook postrouting priority -100; policy accept; ' +
++			'meta l4proto { tcp, udp } fullcone to :1024-65535; ' +
++			'fullcone; ' +
++		'}; ';
++	let cmd = sprintf("/usr/sbin/nft -c '%s' 2>/dev/null", replace(nft_test, "'", "'\\''"));
++	let ok = system(cmd) == 0;
++	if (!ok) {
++		warn("nft_try_fullcone: fullcone expression not available in kernel\n");
++	}
++	return ok;
++}
++
+ 
+ return {
+ 	read_kernel_version: function() {
+@@ -1530,6 +1556,7 @@ return {
+ 			"helper",
+ 			"mark",
+ 			"dscp",
++			"fullcone",
+ 			"dnat",
+ 			"snat",
+ 			"masquerade",
+@@ -2020,6 +2047,7 @@ return {
+ 		}
+ 
+ 		let defs = this.parse_options(data, {
++			fullcone: [ "bool", "0" ],
+ 			input: [ "policy", "drop" ],
+ 			output: [ "policy", "drop" ],
+ 			forward: [ "policy", "drop" ],
+@@ -2054,6 +2082,13 @@ return {
+ 
+ 		delete defs.syn_flood;
+ 
++		if (defs.fullcone) {
++			if (!nft_try_fullcone()) {
++				delete defs.fullcone;
++				warn("fullcone expression not available, disabling fullcone globally\n");
++			}
++		}
++
+ 		this.state.defaults = defs;
+ 	},
+ 
+@@ -2083,6 +2118,9 @@ return {
+ 
+ 			masq6: [ "bool" ],
+ 
++			fullcone: [ "bool" ],
++			fullcone_proto: [ "protocol", null, PARSE_LIST | FLATTEN_LIST ],
++
+ 			extra: [ "string", null, UNSUPPORTED ],
+ 			extra_src: [ "string", null, UNSUPPORTED ],
+ 			extra_dest: [ "string", null, UNSUPPORTED ],
+@@ -2130,6 +2168,42 @@ return {
+ 			}
+ 		}
+ 
++		/* SONiC fullcone: defaults.fullcone is a global gate.
++		 * When off, all fullcone is disabled regardless of zone config.
++		 * When on, each zone must explicitly set fullcone=1 to enable.
++		 *
++		 * Fullcone only covers FULLCONE_PROTOS; other traffic keeps
++		 * ordinary masquerading. An empty fullcone_proto, or one that
++		 * lists "all", means all of them.
++		 *
++		 * Flatten fullcone_proto (list of protocol objects) into plain
++		 * name strings suitable for direct use in nftables templates.
++		 */
++		zone.fullcone = !!(this.state.defaults.fullcone && zone.fullcone);
++
++		let fullcone_proto = FULLCONE_PROTOS;
++
++		if (length(zone.fullcone_proto) && !length(filter(zone.fullcone_proto, p => p?.any))) {
++			fullcone_proto = [];
++
++			for (let p in zone.fullcone_proto) {
++				if (!p)
++					continue;
++				else if (!p.invert && p.name in FULLCONE_PROTOS)
++					push(fullcone_proto, p.name);
++				else if (zone.fullcone)
++					this.warn_section(data, `option 'fullcone_proto' ignores '${p.invert ? '!' : ''}${p.name}', fullcone only applies to ${join(', ', FULLCONE_PROTOS)}`);
++			}
++
++			if (zone.fullcone && !length(fullcone_proto)) {
++				this.warn_section(data, "option 'fullcone_proto' lists no applicable protocol, disabling fullcone");
++				zone.fullcone = false;
++			}
++		}
++
++		zone.fullcone_proto = uniq(fullcone_proto);
++		zone.fullcone6 = zone.fullcone;
++
+ 		if (zone.mtu_fix && this.kernel < 0x040a0000) {
+ 			this.warn_section(data, "option 'mtu_fix' requires kernel 4.10 or later");
+ 			return;
+@@ -2300,6 +2374,19 @@ return {
+ 		zone.related_physdevs = related_physdevs;
+ 
+-		if (zone.masq || zone.masq6)
++		if (zone.masq) {
+ 			zone.dflags.snat = true;
++			if (zone.fullcone)
++				zone.dflags.dnat = true;
++		}
++
++		if (zone.masq6) {
++			zone.dflags.snat = true;
++			if (zone.fullcone6)
++				zone.dflags.dnat = true;
++		}
++
++		/* Like masq zones, fullcone zones get no automatic helpers. */
++		if (zone.fullcone || zone.fullcone6)
++			zone.auto_helper = false;
+ 
+ 		if ((zone.auto_helper && !(zone.masq || zone.masq6)) || length(zone.helper)) {

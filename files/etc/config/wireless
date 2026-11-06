@@ -1,19 +1,25 @@
 # Shipped by this build.  Upstream main ships a zero-length wireless config and
 # leaves both radios disabled; this one comes up ready to associate.
 #
+# The image carries the FULL wpad (wpad-mbedtls), not wpad-basic-mbedtls.
+# Verified on the device with `hostapd -t`: the basic build accepts the 802.11k
+# RRM keys and the 802.11r FT keys, but rejects `bss_transition` and
+# `wnm_sleep_mode` (802.11v) as "unknown configuration item".  The full build
+# enables WNM, so 11k / 11v / 11r are all compiled in.
+#
 # OPEN NETWORK BY DESIGN (same as the 25.12 build of this board): add a password
 # before using it anywhere that matters, e.g.
-#   uci set wireless.default_radio0.encryption='psk2+ccmp'
-#   uci set wireless.default_radio0.key='your-key'
-#   uci set wireless.default_radio1.encryption='psk2+ccmp'
-#   uci set wireless.default_radio1.key='your-key'
+#   uci set wireless.default_radio0.encryption='sae-mixed'
+#   uci set wireless.default_radio0.key='at-least-8-chars'
+#   uci set wireless.default_radio1.encryption='sae-mixed'
+#   uci set wireless.default_radio1.key='at-least-8-chars'
 #   uci commit wireless && wifi reload
 #
-# wpad-basic-mbedtls is in the image.  It supports WPA3-SAE / OWE / 802.11r /
-# 802.11w but NOT 802.11k/v or mesh: hostapd rejects a config containing
-# rrm_neighbor_report / bss_transition and then *both* radios stay down.  So
-# this file deliberately carries no k/v options.  Use wpad-mbedtls (installable
-# from the official feed) if 11k/v is needed.
+# 802.11r NEEDS ENCRYPTION: wifi-scripts' iface_roaming() returns early unless
+# wpa >= 2, so the `ieee80211r` options below are intentionally present but
+# inert while encryption is 'none'.  The moment you set a key, 11r (FT-PSK /
+# FT-SAE) becomes active with no further change.  11k and 11v work right now,
+# also on the open network.
 #
 # country CN keeps the 5 GHz radio legal and gives it a 160 MHz channel.
 # Channel 36 / HE160 overlaps DFS, so hostapd runs a ~60 s CAC on the first
@@ -34,6 +40,20 @@ config wifi-iface 'default_radio0'
 	option mode 'ap'
 	option ssid 'RAX3000Q-2G'
 	option encryption 'none'
+	# 802.11k - radio resource measurement
+	option ieee80211k '1'
+	option rrm_neighbor_report '1'
+	option rrm_beacon_report '1'
+	# 802.11v - BSS transition / WNM
+	option bss_transition '1'
+	option wnm_sleep_mode '1'
+	option time_advertisement '2'
+	option time_zone 'CST-8'
+	# 802.11r - fast transition (needs a key, see the note above)
+	option ieee80211r '1'
+	option mobility_domain 'a1b2'
+	option ft_over_ds '1'
+	option reassociation_deadline '20000'
 
 config wifi-device 'radio1'
 	option type 'mac80211'
@@ -50,3 +70,16 @@ config wifi-iface 'default_radio1'
 	option mode 'ap'
 	option ssid 'RAX3000Q-5G'
 	option encryption 'none'
+	# Same 11k / 11v / 11r set as the 2.4 GHz BSS.  One hostapd instance serves
+	# both, so the radios advertise each other as RRM neighbours automatically.
+	option ieee80211k '1'
+	option rrm_neighbor_report '1'
+	option rrm_beacon_report '1'
+	option bss_transition '1'
+	option wnm_sleep_mode '1'
+	option time_advertisement '2'
+	option time_zone 'CST-8'
+	option ieee80211r '1'
+	option mobility_domain 'a1b2'
+	option ft_over_ds '1'
+	option reassociation_deadline '20000'

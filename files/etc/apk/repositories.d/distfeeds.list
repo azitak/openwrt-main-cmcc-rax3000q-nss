@@ -1,0 +1,10 @@
+# Shipped by this build; overrides the file base-files generates at build time.
+# TUNA does not mirror snapshots/ (only releases), and this is a SNAPSHOT
+# image, so USTC - an OpenWrt tier-1 mirror in China - is used instead.
+# All four indexes were checked to exist (HTTP 200).  Note that kmod packages
+# cannot come from here: this kernel is custom (6.18.60 + NSS patches) and has
+# a different vermagic.  Add kmods to config/cmcc_rax3000q.config and rebuild.
+https://mirrors.ustc.edu.cn/openwrt/snapshots/targets/qualcommax/ipq50xx/packages/packages.adb
+https://mirrors.ustc.edu.cn/openwrt/snapshots/packages/aarch64_cortex-a53/base/packages.adb
+https://mirrors.ustc.edu.cn/openwrt/snapshots/packages/aarch64_cortex-a53/luci/packages.adb
+https://mirrors.ustc.edu.cn/openwrt/snapshots/packages/aarch64_cortex-a53/packages/packages.adb

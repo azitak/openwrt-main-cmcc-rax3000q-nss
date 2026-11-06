@@ -154,17 +154,21 @@ index 0d88be7..be8a1f3 100644
 +	memory-region-names = "q6-region", "m3-region", "m3-dump";
  };
 diff --git a/target/linux/qualcommax/image/ipq50xx.mk b/target/linux/qualcommax/image/ipq50xx.mk
-index 067d2a5..78c2f3f 100644
+index 067d2a5..791642a 100644
 --- a/target/linux/qualcommax/image/ipq50xx.mk
 +++ b/target/linux/qualcommax/image/ipq50xx.mk
-@@ -119,6 +119,10 @@ define Device/cmcc_rax3000q
+@@ -119,6 +119,14 @@ define Device/cmcc_rax3000q
  	PAGESIZE := 2048
  	IMAGE_SIZE := 59392k
  	NAND_SIZE := 128m
 +	# upstream ships this device without DEVICE_PACKAGES, so a stock
-+	# image carries neither ath11k firmware nor the board's BDF
++	# image carries neither ath11k firmware nor the board's BDF.
++	# -wpad-basic-mbedtls removes the default basic variant: the full wpad
++	# is needed for 802.11v (bss_transition / wnm_sleep_mode), which the
++	# basic build rejects as an unknown hostapd configuration item.
 +	DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 \
-+		ipq-wifi-cmcc_rax3000q
++		ipq-wifi-cmcc_rax3000q \
++		-wpad-basic-mbedtls wpad-mbedtls
  endef
  TARGET_DEVICES += cmcc_rax3000q
  

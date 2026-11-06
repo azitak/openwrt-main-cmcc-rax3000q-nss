@@ -101,12 +101,33 @@ using it anywhere that matters: `uci set wireless.default_radio0.encryption='sae
 `set ... .key='your-key'`, repeat for `default_radio1`, then
 `uci commit wireless && wifi reload`.
 
-The image carries `wpad-basic-mbedtls`: WPA2 / WPA3-SAE / OWE / 802.11r /
-802.11w, but NOT 802.11k/v or mesh - hostapd rejects `rrm_neighbor_report`
-and friends outright, which takes *both* radios down. Replace it with
-`apk add wpad-mbedtls` if 11k/v is needed. 5 GHz is channel 36 / HE160 /
-country CN, so the first boot after powering on spends ~60 s in DFS CAC before
-the 5 GHz beacon appears; HE80 avoids that.
+The image carries the FULL `wpad-mbedtls` (the device profile explicitly
+excludes `-wpad-basic-mbedtls`). This was decided after a `hostapd -t` probe
+on the real device: the basic build accepts the 802.11k RRM keys and the
+802.11r FT keys, but rejects `bss_transition` / `wnm_sleep_mode` (802.11v) as
+"unknown configuration item". The full build enables WNM, so 11k/11v/11r are
+all compiled in and all three are present in the shipped wireless config.
+802.11r needs encryption: wifi-scripts' `iface_roaming()` returns early unless
+wpa >= 2, so while the SSIDs are open the FT options are inert; add a key and
+FT-PSK/FT-SAE becomes active with no other change. 11k and 11v work already.
+
+5 GHz is channel 36 / HE160 / country CN, so the first boot spends ~60 s in
+DFS CAC before the 5 GHz beacon appears; HE80 avoids that.
+
+**apk mirror**: this is a SNAPSHOT image. TUNA explicitly does not mirror
+snapshots (only releases), so the sources point at USTC, an OpenWrt tier-1
+mirror in China; all four indexes were checked. `luci`, `luci-theme-argon`
+(a third-party feed), `luci-app-upnp` and four zh_Hans i18n packages are in
+the image; bootstrap stays the default theme.
+
+**SONiC fullcone NAT**: the kernel/fw4/libnftnl/nftables/LuCI patches from
+`mufeng05/openwrt-sonic-fullcone` are built in (6.18 supported, verified to
+apply cleanly against Linux 6.18). It is OFF by default - enable with
+`uci set firewall.@defaults[0].fullcone=1`,
+`uci set firewall.@zone[1].fullcone=1`, `uci commit firewall`,
+`/etc/init.d/firewall restart`; check with `nft list ruleset | grep fullcone`.
+It has not been tested together with NSS/ECM hardware forwarding on this
+board, which hands established connections to the firmware.
 
 Calibration data is extracted by `11-ath11k-caldata` from `0:art` at 0x1000
 (2.4 GHz) and 0x26800 (5 GHz), 128 KiB each, raw - patching the MAC into this

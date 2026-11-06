@@ -11,15 +11,17 @@
 # 2026, so the older "NSS = nss-dp + ssdk" recipe (mufeng05's PZ-L8 project)
 # cannot be applied to main any more; that tree is what replaced it.
 #
-# This project changes five things:
-#   1. edits to files the baseline already ships  -> openwrt/0001-*.patch
-#      (board DTS + image.mk + the rax3000q caldata cases)
+# This project changes six things:
+#   1. edits to files the baseline already ships  -> openwrt/0NNN-*.patch
+#      (board DTS + image.mk + caldata cases; libnftnl autoreconf for fullcone)
 #   2. files the baseline does not have           -> openwrt/tree/, copied in
-#      (the Dosilicon SPI-NAND backport and the board's BDF package)
-#   3. the rootfs overlay                        -> files/, copied into the
-#      build tree's own files/ (wireless config + repair + nss-netlink loader)
-#   4. the .config seed                           -> config/
-#   5. verification, so a missing piece fails here instead of after a build
+#      (Dosilicon backport, BDF package, SONiC fullcone kernel/userspace patches)
+#   3. patches into the installed feeds           -> openwrt/feeds/, copied after
+#      `feeds install` (luci-app-firewall fullcone UI + zh_Hans strings)
+#   4. the rootfs overlay                        -> files/, copied into the
+#      build tree's own files/ (wireless, apk mirror, first-boot repair, rc.local)
+#   5. the .config seed                           -> config/
+#   6. verification, so a missing piece fails here instead of after a build
 #
 # Idempotent: re-running on a prepared tree is a no-op for 1 and safe for the
 # rest.  RESEED=1 replaces an existing .config with the seed again.
@@ -60,13 +62,17 @@ if [ -d "$OW/.git" ]; then
 fi
 
 # ---------------------------------------------------------------- 1. tracked edits
+# 0001 = board (DTS, image.mk, caldata), 0002 = the libnftnl autoreconf hook
+# the SONiC fullcone patch needs.  More 0NNN- patches are picked up in order.
 say "Applying edits to baseline files"
-PATCH="$HERE/openwrt/0001-cmcc-rax3000q-nss.patch"
-if git -C "$OW" apply --reverse --check "$PATCH" 2>/dev/null; then
-    echo "already applied, skipping"
-else
-    run 600 git -C "$OW" apply --verbose "$PATCH"
-fi
+for PATCH in "$HERE"/openwrt/0[0-9][0-9][0-9]-*.patch; do
+    [ -f "$PATCH" ] || continue
+    if git -C "$OW" apply --reverse --check "$PATCH" 2>/dev/null; then
+        echo "  $(basename "$PATCH"): already applied, skipping"
+    else
+        run 600 git -C "$OW" apply --verbose "$PATCH"
+    fi
+done
 
 # ---------------------------------------------------------------- 2. new files
 say "Copying files the baseline does not have"
@@ -117,6 +123,10 @@ cat > "$FEEDS" <<EOF
 src-git packages https://github.com/openwrt/packages.git
 src-git luci https://github.com/openwrt/luci.git
 $NSS_LINE
+# luci-theme-argon is not in the official luci feed.  jerrykuku's master has
+# ucode templates and is maintained against LuCI snapshot (PKG_RELEASE
+# 20261106); the sbwml fork targets the 25.12 branch instead.
+src-git argon https://github.com/jerrykuku/luci-theme-argon.git;master
 EOF
 cat "$FEEDS"
 
@@ -141,7 +151,7 @@ ok=0
 for attempt in 1 2; do
     # A clone that died mid-way leaves a directory that is not a git checkout.
     # scripts/feeds then refuses to touch it, and the retry fails the same way.
-    for d in packages luci nss; do
+    for d in packages luci nss argon; do
         if [ -d "$OW/feeds/$d" ] && [ ! -d "$OW/feeds/$d/.git" ]; then
             echo "WARNING: feeds/$d is not a git checkout, removing it for a clean clone" >&2
             rm -rf "$OW/feeds/$d"
@@ -164,6 +174,31 @@ if ! feeds_install; then
 fi
 echo "feeds updated and installed"
 grep -c 'Installing package' "$feeds_log" | sed 's/^/  packages installed: /' || true
+
+# The SONiC fullcone LuCI patch belongs to luci-app-firewall, which only exists
+# once the luci feed has been cloned, so it has to be copied now rather than
+# with openwrt/tree/ above.  The Chinese strings are appended to the .po file:
+# a patch would not reach it because po/ is read outside the build directory.
+LUCIFW="$OW/feeds/luci/applications/luci-app-firewall"
+if [ -d "$LUCIFW" ]; then
+    say "Installing the fullcone LuCI integration"
+    install -dm755 "$LUCIFW/patches"
+    for p in "$HERE"/openwrt/feeds/luci-app-firewall/patches/*.patch; do
+        [ -f "$p" ] && install -m644 "$p" "$LUCIFW/patches/$(basename "$p")"
+    done
+    ZH="$LUCIFW/po/zh_Hans/firewall.po"
+    if [ -f "$ZH" ]; then
+        sed '/^# BEGIN openwrt-sonic-fullcone$/,/^# END openwrt-sonic-fullcone$/d' \
+            "$ZH" > "$ZH.tmp" && mv "$ZH.tmp" "$ZH"
+        cat "$HERE/openwrt/feeds/luci-app-firewall/zh_Hans.po" >> "$ZH"
+        echo "  LuCI patch + zh_Hans strings installed"
+    else
+        echo "WARNING: $ZH not found - fullcone controls will be untranslated" >&2
+    fi
+else
+    echo "ERROR: $LUCIFW missing after feeds install; fullcone LuCI UI unavailable" >&2
+    exit 1
+fi
 
 # ---------------------------------------------------------------- 4. config
 if [ -f "$OW/.config" ] && [ "${RESEED:-0}" != 1 ]; then
@@ -209,6 +244,18 @@ check() {
     fi
 }
 
+# A package that must NOT be selected: kconfig has a habit of silently
+# resolving conflicts by dropping the package we actually need.
+forbid() {
+    local bad=$1
+    if grep -qx "$bad" "$OW/.config"; then
+        say2file "  FORBIDDEN  $bad"
+        missing=1
+    else
+        say2file "  ok         not selected: $bad"
+    fi
+}
+
 check 'CONFIG_TARGET_qualcommax_ipq50xx_DEVICE_cmcc_rax3000q=y'
 check 'CONFIG_PACKAGE_kmod-qca-dwmac-nss=y'
 check 'CONFIG_PACKAGE_kmod-qca-nss-drv=y'
@@ -228,13 +275,35 @@ check 'CONFIG_NSS_MEM_PROFILE_LOW=y'
 # makes `apk update` report a missing index on every device.
 check 'CONFIG_FEED_nss=m'
 check 'CONFIG_PACKAGE_kmod-qca-nss-drv-netlink=y'
+# apk mirror: a SNAPSHOT image needs a mirror that carries snapshots/.
+check 'CONFIG_VERSION_REPO="https://mirrors.ustc.edu.cn/openwrt/snapshots"'
+check 'CONFIG_IMAGEOPT=y'
+check 'CONFIG_VERSIONOPT=y'
+check 'CONFIG_FEED_argon=m'
+# LuCI + Chinese + UPnP + Argon
+check 'CONFIG_PACKAGE_luci=y'
+check 'CONFIG_PACKAGE_luci-theme-argon=y'
+check 'CONFIG_PACKAGE_luci-app-upnp=y'
+check 'CONFIG_PACKAGE_luci-i18n-base-zh-cn=y'
+# full wpad is what enables 802.11v; the basic variant must not come back
+check 'CONFIG_PACKAGE_wpad-mbedtls=y'
+forbid 'CONFIG_PACKAGE_wpad-basic-mbedtls=y'
+# nss-tools (the ipq807x/ipq60xx variant) is @BROKEN here and conflicts with
+# nss-tools-dwmac.  The luci meta package must not resurrect it.
+forbid 'CONFIG_PACKAGE_nss-tools=y'
 
 for f in \
   "$OW/target/linux/qualcommax/patches-6.18/0810-mtd-spinand-add-support-for-Dosilicon-DS35Q1GA-DS35M1GA.patch" \
   "$OW/package/ipq-wifi-cmcc_rax3000q/Makefile" \
   "$OW/files/etc/config/wireless" \
   "$OW/files/etc/uci-defaults/99-rax3000q-firstboot" \
-  "$OW/files/etc/rc.local"
+  "$OW/files/etc/rc.local" \
+  "$OW/target/linux/generic/hack-6.18/984-add-sonic-fullcone-support.patch" \
+  "$OW/target/linux/generic/hack-6.18/987-sonic-fullcone-fix-races-and-drops.patch" \
+  "$OW/package/network/config/firewall4/patches/001-sonic-fullcone.patch" \
+  "$OW/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch" \
+  "$OW/package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch" \
+  "$OW/feeds/luci/applications/luci-app-firewall/patches/001-add-fullcone-options.patch"
 do
     if [ -f "$f" ]; then
         say2file "  ok       ${f#$OW/}"
@@ -265,6 +334,22 @@ grep -q 'config wifi-device' "$OW/files/etc/config/wireless" ||
     { say2file "  MISSING  radios in files/etc/config/wireless"; missing=1; }
 grep -q 'qca-nss-netlink' "$OW/files/etc/rc.local" ||
     { say2file "  MISSING  qca-nss-netlink loader in files/etc/rc.local"; missing=1; }
+WIFI="$OW/files/etc/config/wireless"
+for k in ieee80211k rrm_neighbor_report bss_transition wnm_sleep_mode ieee80211r; do
+    grep -q "option $k " "$WIFI" ||
+        { say2file "  MISSING  802.11k/v/r option '$k' in wireless config"; missing=1; }
+done
+grep -q '^PKG_FIXUP:=autoreconf' "$OW/package/libs/libnftnl/Makefile" ||
+    { say2file "  MISSING  PKG_FIXUP:=autoreconf in libnftnl (fullcone patch needs it)"; missing=1; }
+grep -q '^# BEGIN openwrt-sonic-fullcone' "$OW/feeds/luci/applications/luci-app-firewall/po/zh_Hans/firewall.po" ||
+    { say2file "  MISSING  fullcone zh_Hans strings in luci-app-firewall"; missing=1; }
+DIST="$OW/files/etc/apk/repositories.d/distfeeds.list"
+grep -q 'mirrors.ustc.edu.cn/openwrt/snapshots' "$DIST" ||
+    { say2file "  MISSING  USTC mirror in $DIST"; missing=1; }
+if grep -q 'downloads.openwrt.org\|mirrors.tuna' "$DIST"; then
+    say2file "  FORBIDDEN  official/TUNA URL still present in $DIST"
+    missing=1
+fi
 
 # Not a check: a per-symbol report of what defconfig did to the seed.  This is
 # what tells a dropped LuCI component from a dropped NSS driver, and it is the
