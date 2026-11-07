@@ -20,13 +20,15 @@ things upstream does not give you:
    of [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss)
    for the same SoC and the same switch.
 
-> **Status:** validated on hardware — Dosilicon NAND, UBI, DSA/WAN, NSS hardware
-> forwarding (ECM counters climbing under real traffic), both radios (5 GHz HE160
-> association), 11k/v/r, LuCI/Argon and the USTC mirror all passed. The latest
-> round turns fullcone NAT ON by default (coexistence with NSS/ECM verified on
-> the device) and fixes nssinfo (no more errors for families the kernel did not
-> build, no more SIGABRT on exit). Back up every partition before flashing,
-> `0:art` above all.
+> **Status:** validated on hardware (audit-fixed image `build-20261107_141736`,
+> see [docs/PORTING.md](docs/PORTING.md) 5f) — Dosilicon/UBI, DSA+WAN, NSS
+> forwarding (71 flows offloaded, 101 million packets through the core with
+> zero drops), both radios (5 GHz HE160 station associated at 1921.5 Mbit/s,
+> wifili on the NSS path), 11k/v/r, fullcone NAT on by default (coexistence
+> with NSS/ECM verified), nssinfo fixes, LuCI/Argon and the USTC mirror all
+> passed. Board-level facts from the previous generation still hold: Dosilicon
+> or GigaDevice NAND, ECC 4/512, `ubi.mtd=rootfs`. Back up every partition
+> before flashing, `0:art` above all.
 
 ## Why the PZ-L8 recipe cannot be used on main
 
@@ -179,13 +181,14 @@ board's wiring, not the offload.
 
 ## Known limits
 
-- **Wi-Fi offload (wifili) is validated on this board** (5 GHz HE160
-  association, traffic on the NSS path). Two things to keep in mind: mode 2 +
-  the 256M profile reduces how many VDEVs/peers the firmware may create (patch
-  `903`, paired with `ATH11K_MEM_PROFILE_256M` so both radios and the NSS core
-  fit in 256 MB; upstream compiles for 512 MB and therefore ships wifi off), and
-  if wifili fails to come up the radios stay on the host path — routing is
-  unaffected.
+- **Wi-Fi offload (wifili) is validated on this board** (5 GHz HE160 station
+  associated at 1921.5 Mbit/s — HE-MCS 9 / 160 MHz — traffic on the NSS path,
+  `nss_offload=1` / `frame_mode=2` confirmed). Two things to keep in mind:
+  mode 2 + the 256M profile reduces how many VDEVs/peers the firmware may
+  create (patch `903`, paired with `ATH11K_MEM_PROFILE_256M` so both radios and
+  the NSS core fit in 256 MB; upstream compiles for 512 MB and therefore ships
+  wifi off), and if wifili fails to come up the radios stay on the host path —
+  routing is unaffected.
 - sysupgrade follows upstream main (`elecom_upgrade_prepare` group); it has not
   been run on hardware here.
 - kmods not in the image cannot be installed from the official feeds (kernel

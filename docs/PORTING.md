@@ -310,19 +310,19 @@ wpad-* 不在。其余内存优化方向（zram、conntrack 调小、NSS/M3 regi
 
 ## 5f. 审计修复镜像的真机复测与 NSS 参数体检（build-20261107_141736）
 
-8 个文件的审计修复 + `0001` 补丁头手术合入 `6ccddcd`，CI 产出
+8 个文件的审计修复（含 `0001` 补丁头手术）合入 `6ccddcd`，CI 产出
 `build-20261107_141736`（`build-info.txt` 实证 `project_commit=6ccddcd`、
 `base_commit=fb7e09a`）。刷入后做了一轮只读复测，并对 NSS 参数做体检：
 
 | 项 | 实测 |
 |---|---|
 | NSS 拓扑 | `nss.general.topology='dsa'` 生效：conduit tag 走 `qca-8021q`，`qca-dsa-nss` 为 wan（if_num 29）/ lan1（31）建固件 VLAN 节点，`alloc_failures=0` |
-| NSS 转发 | `nssinfo ipv4`：core0 `eth_rx` 1.29 亿包、`ipv4` 1.28 亿包，**Drops 全 0**；回 CPU 的 exceptions 占比约 0.26% |
-| ECM | `accelerated_count=71`（tcp 62 / udp 9），`stats_request success=96000 fail=0`，pending 0/0 |
+| NSS 转发 | `nssinfo ipv4`（快照）：core0 `eth_rx` RX≈TX≈1.01 亿包、`ipv4` RX≈TX≈1.01 亿包，**Drops 全 0**；回 CPU 的 exceptions 占比约 0.26%（复查时 `ipv4_rx_pkts` 已涨到 1.03 亿，只增不减） |
+| ECM | `accelerated_count=71`（tcp 62 / udp 9，快照），`stats_request success=96000 fail=0`，pending 0/0 |
 | ath11k 实参 | `/sys/module/ath11k/parameters/nss_offload=1`、`frame_mode=2`（wifili 以太帧模式生效） |
 | fullcone | `defaults.fullcone='1'` + wan zone `fullcone='1'` → `dstnat_wan` / `srcnat_wan` 各一条 fullcone 规则，与 NSS/ECM 共存 |
-| 连通 | WAN DHCP 192.168.2.165；网关 ping 1.2 ms、公网 ping 46 ms 0% 丢包 |
-| 内存/温度 | MemAvailable 40.8 MB（zram swap 仅用 2.2 MB），四温区 59–60 °C，load ~0.17 |
+| 连通 | WAN DHCP 192.168.2.165；网关 ping ~1.3 ms、公网 ping 46 ms 0% 丢包 |
+| 内存/温度 | MemAvailable ~40 MiB（zram swap 仅用 2.2 MiB），四温区 59–60 °C，load ~0.17 |
 | 参数基线 | `max_ipv4/6_conn=512`（默认池，超限回落 CPU 慢路径）、8 MiB NSS DDR（LOW profile）、retail 12.5 固件、`fw_csum` off —— 256 MB 板现阶段不建议动 |
 
 顺带定音的三条无害噪音：procd 找不到 `firmware-2.bin`（ath11k 实际用

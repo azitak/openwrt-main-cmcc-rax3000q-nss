@@ -18,7 +18,7 @@
 
 > **状态：镜像已在真机完整验证（审计修复镜像 `build-20261107_141736` 复测，
 > 见 [docs/PORTING.md](docs/PORTING.md) 5f）**——Dosilicon/UBI、DSA+WAN、
-> NSS 加速（71 流实时卸载、核心面 1.29 亿包零丢）、双射频（5G HE160 实测关联
+> NSS 加速（ECM 71 流卸载、核心面 1.01 亿包零丢）、双射频（5G HE160 实测关联
 > 1921.5 Mbit/s、wifili 走 NSS）、11k/v/r、fullcone（默认开启且与 NSS/ECM
 > 共存正常）、nssinfo 修复、LuCI/Argon、USTC apk 源全部通过。
 > 与上一代（v25.12.5 基线）确认过的板级事实不变：闪存为 Dosilicon 或

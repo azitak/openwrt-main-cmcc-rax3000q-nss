@@ -73,9 +73,8 @@ config wifi-iface 'default_radio1'
 	option ssid 'RAX3000Q-5G'
 	option encryption 'none'
 	# Same 11k / 11v / 11r set as the 2.4 GHz BSS.  Both BSSes run inside one
-	# global hostapd process (verified live: `/usr/sbin/hostapd -s -g
-	# /var/run/hostapd/global`); each radio still keeps its own 11k
-	# neighbour table.
+	# global hostapd process (verified live in ps: `hostapd -s -g`); each
+	# radio still keeps its own 11k neighbour table.
 	option ieee80211k '1'
 	option rrm_neighbor_report '1'
 	option rrm_beacon_report '1'
