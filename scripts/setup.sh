@@ -336,6 +336,9 @@ check 'CONFIG_ATH11K_NSS_SUPPORT=y'
 check 'CONFIG_PACKAGE_ath11k-firmware-ipq5018-qcn6122=y'
 check 'CONFIG_PACKAGE_ipq-wifi-cmcc_rax3000q=y'
 check 'CONFIG_ATH11K_MEM_PROFILE_256M=y'
+# The PR #21 NSS profile is a separate symbol (depends on the two above);
+# without it the 256 MB build keeps the full NSS TX pools / CE5 buffers.
+check 'CONFIG_ATH11K_NSS_MEM_PROFILE_256M=y'
 check 'CONFIG_NSS_MEM_PROFILE_LOW=y'
 # tristate M comments the feed's repository line out of distfeeds.list.
 # The nss feed is local to this project and is on no public OpenWrt mirror,
