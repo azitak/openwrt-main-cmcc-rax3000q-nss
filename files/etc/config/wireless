@@ -71,8 +71,9 @@ config wifi-iface 'default_radio1'
 	option mode 'ap'
 	option ssid 'RAX3000Q-5G'
 	option encryption 'none'
-	# Same 11k / 11v / 11r set as the 2.4 GHz BSS.  One hostapd instance serves
-	# both, so the radios advertise each other as RRM neighbours automatically.
+	# Same 11k / 11v / 11r set as the 2.4 GHz BSS.  The radios are separate
+	# hostapd processes: 11k is active on both, but the two neighbour tables
+	# are maintained independently.
 	option ieee80211k '1'
 	option rrm_neighbor_report '1'
 	option rrm_beacon_report '1'

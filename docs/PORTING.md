@@ -214,6 +214,9 @@ URL（`CONFIG_FEED_nss=m` 修）；`nssinfo` 全组 `-22` 是 `qca-nss-netlink.k
 `DEVICE_PACKAGES += -wpad-basic-mbedtls wpad-mbedtls`（负号语法由
 `include/image.mk` 的 `merge_packages` 与 `scripts/target-metadata.pl` 支持，
 ath79 多处现成用例），wireless 配置里补齐 11k/11v/11r 选项。
+（当时的口径是换全功能 `wpad-mbedtls`；后按 5e 的内存审计收窄为只带
+`hostapd-mbedtls`——本板没有 station/roaming 场景，`wpa_supplicant` 二进制
+常驻属纯浪费，最终镜像以第 49 行的包列表为准，见 5e。）
 wifi-scripts `iface_roaming()` 有 `if (!ieee80211r || wpa < 2) return`，
 所以保持开放网络时 11r 惰性、加密码后自动生效（用户选择保持开放）。
 

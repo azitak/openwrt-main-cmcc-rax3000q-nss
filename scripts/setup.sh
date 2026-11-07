@@ -400,7 +400,7 @@ grep -q 'nand-ecc-strength = <4>' "$DTS" ||
 grep -q 'ubi.mtd=rootfs' "$DTS" ||
     { say2file "  MISSING  ubi.mtd=rootfs in $DTS bootargs-append"; missing=1; }
 CAL="$OW/target/linux/qualcommax/ipq50xx/base-files/etc/hotplug.d/firmware/11-ath11k-caldata"
-n=$(grep -c '^[[:space:]]*cmcc,rax3000q)' "$CAL" 2>/dev/null || echo 0)
+n=$(grep -c '^[[:space:]]*cmcc,rax3000q)' "$CAL" 2>/dev/null || true)
 [ "$n" = 2 ] ||
     { say2file "  MISSING  rax3000q caldata cases in 11-ath11k-caldata (have $n, need 2)"; missing=1; }
 grep -q 'caldata_extract "0:art" 0x1000 0x20000' "$CAL" ||
@@ -420,8 +420,11 @@ grep -q '^PKG_FIXUP:=autoreconf' "$OW/package/libs/libnftnl/Makefile" ||
     { say2file "  MISSING  PKG_FIXUP:=autoreconf in libnftnl (fullcone patch needs it)"; missing=1; }
 grep -q '^# BEGIN openwrt-sonic-fullcone' "$OW/feeds/luci/applications/luci-app-firewall/po/zh_Hans/firewall.po" ||
     { say2file "  MISSING  fullcone zh_Hans strings in luci-app-firewall"; missing=1; }
-grep -q "fullcone='1'" "$OW/files/etc/uci-defaults/16-rax3000q-fullcone" ||
-    { say2file "  MISSING  fullcone enable in 16-rax3000q-fullcone"; missing=1; }
+# The zone loop must store the bare value.  A quoted literal (fullcone='1')
+# survives into uci as three characters and fw4 parse_bool() rejects it, so
+# 'fullcone=1"' only matches the correct unquoted write.
+grep -q 'fullcone=1"' "$OW/files/etc/uci-defaults/16-rax3000q-fullcone" ||
+    { say2file "  MISSING  unquoted zone fullcone enable in 16-rax3000q-fullcone"; missing=1; }
 grep -q 'return -ENOENT' "$OW/feeds/nss/nss-userspace-oss/patches/0040-nssinfo-tolerate-missing-nl-subsystems.patch" ||
     { say2file "  MISSING  nssinfo -ENOENT fix in the nss feed patch"; missing=1; }
 DIST="$OW/files/etc/apk/repositories.d/distfeeds.list"

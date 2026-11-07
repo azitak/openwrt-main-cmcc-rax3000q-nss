@@ -296,7 +296,7 @@ reset
 **先备份**（U-Boot 里或进 OpenWrt 后）：
 
 ```
-nanddump -f art.bin /dev/mtd$(grep '"0:art"' /proc/mtd | cut -d: -f1)
+nanddump -f art.bin /dev/mtd$(grep '"0:art"' /proc/mtd | cut -d: -f1 | sed 's/^mtd//')
 ```
 
 默认 LAN 地址 **192.168.1.1**。两个射频开机即启用，SSID

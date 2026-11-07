@@ -25,12 +25,12 @@ import os
 import re
 import sys
 
-LABEL_DEF = re.compile(r'^\s*([a-z_][a-z0-9_]*):\s', re.M)
-LABEL_NODE = re.compile(r'([a-z_][a-z0-9_]*):\s*[a-zA-Z0-9,._@+-]+\s*\{')
-PATCH_LABEL = re.compile(r'^\+\s*([a-z_][a-z0-9_]*):\s*[a-zA-Z0-9,._@+-]+\s*\{', re.M)
+LABEL_DEF = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*):\s', re.M)
+LABEL_NODE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*):\s*[a-zA-Z0-9,._@+-]+\s*\{')
+PATCH_LABEL = re.compile(r'^\+\s*([A-Za-z_][A-Za-z0-9_]*):\s*[a-zA-Z0-9,._@+-]+\s*\{', re.M)
 COMMENT = re.compile(r'/\*.*?\*/', re.S)
 LINE_COMMENT = re.compile(r'^\s*//.*$', re.M)
-REF = re.compile(r'&([a-z_][a-z0-9_]*)')
+REF = re.compile(r'&([A-Za-z_][A-Za-z0-9_]*)')
 
 
 def read(path):

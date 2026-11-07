@@ -15,7 +15,7 @@ uci -q set firewall.@defaults[0].fullcone='1'
 i=0
 while uci -q get "firewall.@zone[$i]" >/dev/null; do
     if [ "$(uci -q get "firewall.@zone[$i].masq")" = "1" ]; then
-        uci -q set "firewall.@zone[$i].fullcone='1'"
+        uci -q set "firewall.@zone[$i].fullcone=1"
     fi
     i=$((i + 1))
 done

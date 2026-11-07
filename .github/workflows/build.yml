@@ -140,8 +140,11 @@ jobs:
             sleep 5
           done
           [ "$ok" = 1 ] || { echo "::error::sources could not be downloaded"; exit 1; }
-          # a zero-length download is a silent poison pill later in the build
-          find dl -size -1024c -type f -print -delete || true
+          # A sub-1 KiB "archive" in dl/ is a truncated or error-page
+          # response.  Restrict to archive names so tiny, legitimate files
+          # (READMEs, checksum stubs) aren't collateral damage.
+          find dl -type f \( -name '*.tgz' -o -name '*.tar.*' -o -name '*.zip' -o \
+               -name '*.gz' -o -name '*.bz2' -o -name '*.xz' \) -size -1024c -print -delete || true
 
       - name: Check the board DTS references
         if: env.PREPARE_ONLY != 'true'
@@ -155,7 +158,11 @@ jobs:
           set -euo pipefail
           cd openwrt
           make -j"$(nproc)" target/linux/prepare
-          KDIR=$(echo build_dir/target-*/linux-qualcommax_ipq50xx/linux-*)
+          KDIR=$(ls -d build_dir/target-*/linux-qualcommax_ipq50xx/linux-* 2>/dev/null | tail -n 1)
+          if [ -z "$KDIR" ]; then
+              echo "::error::kernel build dir not found after target/linux/prepare"
+              exit 1
+          fi
           echo "kernel tree: $KDIR"
           python3 ../rax3000q/scripts/check-dts-labels.py \
             target/linux/qualcommax/dts/ipq5018-rax3000q.dts \

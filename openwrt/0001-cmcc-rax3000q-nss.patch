@@ -83,29 +83,12 @@ index 0d88be7..c284b79 100644
  		nand-bus-width = <8>;
  
  		partitions {
-@@ -318,10 +360,37 @@
+@@ -318,10 +360,20 @@
  	};
  };
  
 -//256M RAM is too small for ath11k, so WiFi is disabled to prevent OOM.
-+/*
-+ * Both radios are enabled on this port: the image is built for 256 MB
-+ * (ATH11K_MEM_PROFILE_256M + NSS_MEM_PROFILE_LOW), which is what makes
-+ * ath11k fit here, and mode 2 is the profile the NSS wifili path needs.
-+ * Upstream disables them because it ships the 512 MB defaults.
-+ */
-+&q6v5_wcss {
-+	/* The QCN6102 radio should map to UPD ID 2. Without       */
-+	/* bootargs, the firmware will expect it to be on UPD ID 3 */
  
-+	boot-args = </*       type: */ 0x2 /* PCIE1 */
-+		     /*     length: */ 4
-+		     /*      PD id: */ 2
-+		     /* reset GPIO: */ 27
-+		     /*   reserved: */ 0 0>;
-+
-+};
-+
 +/*
 + * Both radios are enabled on this port: the image is built for 256 MB
 + * (ATH11K_MEM_PROFILE_256M + NSS_MEM_PROFILE_LOW), which is what makes
@@ -123,7 +106,7 @@ index 0d88be7..c284b79 100644
  	/* The QCN6102 radio should map to UPD ID 2. Without       */
  	/* bootargs, the firmware will expect it to be on UPD ID 3 */
  
-@@ -335,22 +404,21 @@
+@@ -335,22 +387,21 @@
  
  &wifi {
  	// IPQ5018
