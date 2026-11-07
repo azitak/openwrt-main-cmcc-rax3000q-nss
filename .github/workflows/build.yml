@@ -124,9 +124,22 @@ jobs:
           grep -q 'ipq5018-nss.dtsi' "$DTS" || { echo "::error::the board has no NSS node"; exit 1; }
           echo "Dosilicon driver, 4-bit ECC, UBI bootargs and the NSS node are in place"
 
+      - name: Restore the download cache (dl/)
+        if: env.PREPARE_ONLY != 'true'
+        # First successful run fills this cache; later runs pull the source
+        # tarballs from the GitHub Actions cache instead of refetching them
+        # from sources.openwrt.org (which is slow or unreachable from the
+        # runners often enough to burn the whole download step).
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: openwrt-dl-${{ github.run_id }}
+          restore-keys: |
+            openwrt-dl-
+
       - name: Download sources
         if: env.PREPARE_ONLY != 'true'
-        timeout-minutes: 90
+        timeout-minutes: 120
         env:
           GIT_HTTP_LOW_SPEED_LIMIT: 1000
           GIT_HTTP_LOW_SPEED_TIME: 60
@@ -134,9 +147,9 @@ jobs:
           set -euo pipefail
           cd openwrt
           ok=0
-          for attempt in 1 2 3; do
-            if timeout --kill-after=60 25m make download -j"$(nproc)"; then ok=1; break; fi
-            echo "::warning::download attempt $attempt failed or hit the 25 minute limit"
+          for attempt in 1 2 3 4; do
+            if timeout --kill-after=60 20m make download -j"$(nproc)"; then ok=1; break; fi
+            echo "::warning::download attempt $attempt failed or hit the 20 minute limit"
             sleep 5
           done
           [ "$ok" = 1 ] || { echo "::error::sources could not be downloaded"; exit 1; }
