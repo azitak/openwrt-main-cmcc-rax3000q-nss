@@ -16,63 +16,9 @@
    在 PZ-L8（同 SoC、同交换机）上跑通的 NSS 方案，在 main 上落成当前唯一可行的那条路：
    **保留上游 stmmac 驱动，用一小块 glue 模块把 GMAC 的数据面交给 NSS 固件**。
 
-> **状态：镜像已在真机完整验证（审计修复镜像 `build-20261107_141736` 复测，
-> 见 [docs/PORTING.md](docs/PORTING.md) 5f）**——Dosilicon/UBI、DSA+WAN、
-> NSS 加速（ECM 71 流卸载、核心面 1.01 亿包零丢）、双射频（5G HE160 实测关联
-> 1921.5 Mbit/s、wifili 走 NSS）、11k/v/r、fullcone（默认开启且与 NSS/ECM
-> 共存正常）、nssinfo 修复、LuCI/Argon、USTC apk 源全部通过。
-> 与上一代（v25.12.5 基线）确认过的板级事实不变：闪存为 Dosilicon 或
-> GigaDevice、ECC 必须 4/512、bootargs 需要 `ubi.mtd=rootfs`。刷机前
-> **务必备份全部分区**，尤其是 `0:art`。
-
----
-
-## 为什么不是"把 PZ-L8 那套 NSS 补丁直接搬过来"
-
-2026-07-11，OpenWrt main 合入 PR #22381（`qualcommax: ipq50xx: convert to UNIPHY PCS
-and DWMAC stack` / `kernel: drop qca-nss-dp and qca-ssdk`）：
-
-- **ipq50xx 从 QSDK 的 `qca-nss-dp` + `qca-ssdk` 换成了上游 `stmmac`（`dwmac-ipq5018`）
-  + UNIPHY PCS**，QCA8337 由 `qca8k` 以 DSA 方式接管；
-- `qca-nss-dp`、`qca-ssdk` 两个包**从源码树里删除**。
-
-而 [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss)
-（以及本作者上一版
-[openwrt-cmcc-rax3000q-nss](https://github.com/azitak/openwrt-cmcc-rax3000q-nss)）建立在
-`v25.12.5`（内核 6.12）上，整套数据面依赖 `qca-nss-dp`：`dp1`/`dp2` 虚拟网口、
-`qca-ssdk` 的 switch 驱动、`0960`–`0971` 一串针对 6.12 调好的内核补丁、
-159 KB 的 ath11k wifili 补丁。**换基线到 main 会让这一整套全部失效**，
-不是改几个设备树属性的问题。
-
-所以本仓库采用 main 上已经跑通的那条路，并按 PZ-L8 项目的**思路与板级数据**把它接到
-RAX3000Q：
-
-```
-kernel 6.18 stmmac (dwmac-ipq5018)          ← 保留上游驱动，phylink/MDIO/netdev 都还在内核
-        │  stmmac 数据面 claim API（patch 0956）
-        ▼
-kmod-qca-dwmac-nss                          ← glue：TX 排空、NAPI 关、DMA 停、ndo_start_xmit 改道
-        │  实现 qca-nss-drv 期待的 nss-dp 接口
-        ▼
-qca-nss-drv + NSS 固件（12.5-210）          ← UBI32 核接管转发
-        ▼
-qca-nss-ecm                                 ← 连接跟踪 → 加速规则（`qca-dsa-nss` 为 DSA 端口建固件 VLAN 节点）
-```
-
-数据面之上，交换机的接线方式不变：QCA8337 仍然由 `qca8k` 以 DSA 驱动，NSS 服务在 netifd
-起来之前把 conduit 的 tag 协议换成 `qca-8021q`（普通 802.1Q），固件才解析得了；
-`qca-dsa-nss` 再给每个 DSA 端口/VLAN 一个固件 VLAN 接口，ECM 才能为它们下发规则。
-**`lan1`-`lan3` / `wan` 这些接口名和 stock 镜像一致**，不改成 `eth0.1`/`eth0.2`。
-
-这条路上的工作来自 [Julius Bairaktaris](https://github.com/JuliusBairaktaris) 的
-NSS-on-mainline 系列与 [kuncy7](https://github.com/kuncy7/openwrt-nss-edma) 的 ipq50xx
-实现（GL-B3000 等 15+ 台 IPQ5018 实测）。本仓库的基线就是它：
-
-| 部分 | 取自 | 说明 |
-|---|---|---|
-| OpenWrt 树 | `kuncy7/openwrt-nss-edma` 分支 `c3po-tag-8021q`（CI 默认跟随分支头） | OpenWrt main + NSS 系列，内核 6.18.60 |
-| NSS 包 | 该树的 feeds：`kuncy7/nss-packages` 分支 `ipq50xx-rebase` | `qca-nss-drv` / `ecm` / `clients` / `nss-firmware` / `sqm-scripts-nss` |
-| 板级数据 | 上游 mainline DTS + 社区 QSDK DTS + 官方 BDF | 见下 |
+> **状态：镜像已在真机完整验证**（Dosilicon/UBI、DSA+WAN、NSS 加速、
+> 双射频 5G HE160、11k/v/r、fullcone、LuCI/USTC 源全部通过）。
+> 刷机前**务必备份全部分区**，尤其是 `0:art`。
 
 ---
 
@@ -255,8 +201,8 @@ cd openwrt && make -j$(nproc)
 
 # 产物
 ls bin/targets/qualcommax/ipq50xx/
-#  openwrt-qualcommax-ipq50xx-cmcc_rax3000q-squashfs-factory.ubi
-#  openwrt-qualcommax-ipq50xx-cmcc_rax3000q-squashfs-sysupgrade.bin
+#  openwrt-snapshot-<revision>-qualcommax-ipq50xx-cmcc_rax3000q-squashfs-factory.ubi
+#  openwrt-snapshot-<revision>-qualcommax-ipq50xx-cmcc_rax3000q-squashfs-sysupgrade.bin
 ```
 
 想改包就 `make menuconfig`，改完用
@@ -290,7 +236,7 @@ push / PR 都**不会**编译（一次完整镜像约 90 分钟，改文档不�
 原厂 U-Boot（3-pin 串口 115200n8 打断，PC 侧起 TFTP，原厂示例用 192.168.10.19）：
 
 ```
-tftpboot 192.168.10.19:openwrt-qualcommax-ipq50xx-cmcc_rax3000q-squashfs-factory.ubi
+tftpboot 192.168.10.19:openwrt-snapshot-<revision>-qualcommax-ipq50xx-cmcc_rax3000q-squashfs-factory.ubi
 flash rootfs
 reset
 ```
@@ -371,36 +317,11 @@ top                     # 满速转发时 idle > 90%
 
 ---
 
-## 已知限制（诚实版）
-
-- **Wi-Fi offload（wifili）已在真机验证**：5G HE160 站点关联 1921.5 Mbit/s
-  （HE-MCS 9 / 160 MHz）、流量走 NSS 路径（`logread -e nss` 的
-  "Wi-Fi on the NSS path"，`nss_offload=1` / `frame_mode=2` 实值确认）。
-  留意两点：mode 2 + 256M 档位会减少固件可创建的 VDEV/peer 数量（补丁 `903`，
-  配合 `ATH11K_MEM_PROFILE_256M` 才能在 256 MB 里同时容纳两个射频与 NSS；
-  上游按 512 MB 档位编译，因此把 wifi 关掉了）；若 wifili 起不来，两个射频
-  会留在主机协议栈上（ath11k 的握手失败会打日志），路由不受影响。
-- **sysupgrade 用的是上游 main 的路径**（`cmcc,rax3000q` 与 PZ-L8 同组，
-  `elecom_upgrade_prepare` + `nand_do_upgrade`）。上一代项目为了兼容原厂 U-Boot
-  改成过 `CI_UBIPART="rootfs"`；本仓库跟随上游。首版镜像已由用户通过 U-Boot TFTP
-  刷入并正常启动，但 **sysupgrade 路径本身仍未在真机上跑过**。
-- 镜像里没有的 kmod（wireguard、tun、USB 存储等）**不能从官方 feed 装**：
-  内核不是官方编译的那一个，`apk` 会以 `kernel=...~vermagic` 拒绝。
-  要用就在种子配置里加，重新编译。
-- 首次从原厂固件切换需要 U-Boot TFTP；原厂 `bootipq` 的 A/B 槽逻辑没有改动。
-
----
-
 ## 参考与致谢
 
-- [kuncy7/openwrt-nss-edma](https://github.com/kuncy7/openwrt-nss-edma) —— 本仓库的基线：
-  OpenWrt main + NSS on 6.18，ipq50xx 的 `qca-dwmac-nss` / `qca8337-nss` / `nss-tools-dwmac`
+- [kuncy7/openwrt-nss-edma](https://github.com/kuncy7/openwrt-nss-edma) —— 基线（OpenWrt main + NSS on 6.18）
 - [JuliusBairaktaris](https://github.com/JuliusBairaktaris) —— NSS-on-upstream-driver 的思路与内核侧 patch
-- [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss) ——
-  同平台机型的 NSS 移植范本、板级数据与运行期读数（本仓库的参照对象）
-- [hzyitc/openwrt-redmi-ax3000](https://github.com/hzyitc/openwrt-redmi-ax3000) ——
-  RAX3000Q 的官方 BDF 与 QSDK 设备树
-- OpenWrt main 的 RAX3000Q 支持（commit `d592680cc501`）—— 主线 DTS、镜像 profile、board.d
-- Ahmed Naseef —— Dosilicon DS35Q1GA 驱动（Linux 7.0）
+- [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss) —— 同平台 NSS 移植范本与板级数据
+- [hzyitc/openwrt-redmi-ax3000](https://github.com/hzyitc/openwrt-redmi-ax3000) —— 官方 BDF 与 QSDK 设备树
 
 细节与逐文件决策见 [docs/PORTING.md](docs/PORTING.md)。

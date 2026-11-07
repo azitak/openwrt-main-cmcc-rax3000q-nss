@@ -20,54 +20,9 @@ things upstream does not give you:
    of [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss)
    for the same SoC and the same switch.
 
-> **Status:** validated on hardware (audit-fixed image `build-20261107_141736`,
-> see [docs/PORTING.md](docs/PORTING.md) 5f) — Dosilicon/UBI, DSA+WAN, NSS
-> forwarding (71 flows offloaded, 101 million packets through the core with
-> zero drops), both radios (5 GHz HE160 station associated at 1921.5 Mbit/s,
-> wifili on the NSS path), 11k/v/r, fullcone NAT on by default (coexistence
-> with NSS/ECM verified), nssinfo fixes, LuCI/Argon and the USTC mirror all
-> passed. Board-level facts from the previous generation still hold: Dosilicon
-> or GigaDevice NAND, ECC 4/512, `ubi.mtd=rootfs`. Back up every partition
-> before flashing, `0:art` above all.
-
-## Why the PZ-L8 recipe cannot be used on main
-
-On 2026-07-11 OpenWrt main merged PR #22381: `qualcommax: ipq50xx: convert to
-UNIPHY PCS and DWMAC stack` and `kernel: drop qca-nss-dp and qca-ssdk`.
-ipq50xx moved from the QSDK data path (`qca-nss-dp` + `qca-ssdk`) to the
-upstream `stmmac` driver (`dwmac-ipq5018`) with the QCA8337 behind DSA, and
-both packages were deleted from the tree. mufeng05's project — and this
-author's previous [v25.12.5 port](https://github.com/azitak/openwrt-cmcc-rax3000q-nss) —
-depend on `qca-nss-dp`, `dp1`/`dp2`, the `qca-ssdk` switch driver and eleven
-6.12 kernel patches, plus a 159 KB ath11k wifili patch. None of that survives a
-baseline change to main.
-
-So this repository takes the path that main itself grew, and feeds the PZ-L8
-project's board data and lessons into it:
-
-```
-kernel 6.18 stmmac (dwmac-ipq5018)      upstream driver stays; phylink/MDIO/netdev stay with the host
-        |  stmmac data-plane claim API (patch 0956)
-        v
-kmod-qca-dwmac-nss                      TX drained, NAPI off, DMA stopped, ndo_start_xmit redirected
-        |  implements the nss-dp API qca-nss-drv expects
-        v
-qca-nss-drv + NSS firmware (12.5-210)   UBI32 core takes over forwarding
-        v
-qca-nss-ecm                             conntrack -> acceleration rules (qca-dsa-nss firmware VLAN nodes)
-```
-
-Wiring is untouched: the QCA8337 keeps its DSA driver, and before netifd runs
-the NSS service switches the conduit's tag protocol to `qca-8021q`
-(plain 802.1Q), which the firmware can parse; `qca-dsa-nss` then gives every
-DSA port and VLAN a firmware VLAN interface so ECM can write rules for it.
-**`lan1`-`lan3` and `wan` stay the interface names they are on a stock image.**
-
-| part | source |
-|---|---|
-| OpenWrt tree | `kuncy7/openwrt-nss-edma`, branch `c3po-tag-8021q` (CI follows the branch head) — OpenWrt main + the NSS series, kernel 6.18.60 |
-| NSS packages | its feed `kuncy7/nss-packages`, branch `ipq50xx-rebase` |
-| board data | upstream mainline DTS, community QSDK DTS, the official BDF |
+> **Status:** validated on hardware (Dosilicon/UBI, DSA/WAN, NSS offload,
+> both radios 5 GHz HE160, 11k/v/r, fullcone, LuCI/USTC mirror). Back up
+> every partition before flashing, `0:art` above all.
 
 ## What this repository changes
 
@@ -179,28 +134,9 @@ topology; `uci set nss.general.enabled='0'` makes that permanent. Keep
 before ECM sees them. The single-CPU-port ceiling is ~911 Mbit/s; that is the
 board's wiring, not the offload.
 
-## Known limits
-
-- **Wi-Fi offload (wifili) is validated on this board** (5 GHz HE160 station
-  associated at 1921.5 Mbit/s — HE-MCS 9 / 160 MHz — traffic on the NSS path,
-  `nss_offload=1` / `frame_mode=2` confirmed). Two things to keep in mind:
-  mode 2 + the 256M profile reduces how many VDEVs/peers the firmware may
-  create (patch `903`, paired with `ATH11K_MEM_PROFILE_256M` so both radios and
-  the NSS core fit in 256 MB; upstream compiles for 512 MB and therefore ships
-  wifi off), and if wifili fails to come up the radios stay on the host path —
-  routing is unaffected.
-- sysupgrade follows upstream main (`elecom_upgrade_prepare` group); it has not
-  been run on hardware here.
-- kmods not in the image cannot be installed from the official feeds (kernel
-  vermagic differs) — add them to the seed and rebuild.
-
-See [docs/PORTING.md](docs/PORTING.md) for the file-by-file reasoning.
-
 ## Credits
 
-[kuncy7/openwrt-nss-edma](https://github.com/kuncy7/openwrt-nss-edma) (baseline),
-[JuliusBairaktaris](https://github.com/JuliusBairaktaris) (NSS on upstream
-drivers), [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss)
-(reference port, board data, runtime checks), [hzyitc/openwrt-redmi-ax3000](https://github.com/hzyitc/openwrt-redmi-ax3000)
-(BDF and QSDK DTS), OpenWrt's own RAX3000Q commit `d592680cc501`, and Ahmed
-Naseef for the Dosilicon driver.
+- [kuncy7/openwrt-nss-edma](https://github.com/kuncy7/openwrt-nss-edma) — baseline (OpenWrt main + NSS on 6.18)
+- [JuliusBairaktaris](https://github.com/JuliusBairaktaris) — NSS-on-upstream-driver work
+- [mufeng05/openwrt-cmcc-pz-l8-nss](https://github.com/mufeng05/openwrt-cmcc-pz-l8-nss) — reference port and board data
+- [hzyitc/openwrt-redmi-ax3000](https://github.com/hzyitc/openwrt-redmi-ax3000) — BDF and QSDK DTS
