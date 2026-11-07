@@ -65,7 +65,7 @@ DSA port and VLAN a firmware VLAN interface so ECM can write rules for it.
 
 | part | source |
 |---|---|
-| OpenWrt tree | `kuncy7/openwrt-nss-edma`, branch `c3po-tag-8021q`, commit `fb7e09a` — OpenWrt main 2026-10-09 + the NSS series, kernel 6.18.60 |
+| OpenWrt tree | `kuncy7/openwrt-nss-edma`, branch `c3po-tag-8021q` (CI follows the branch head) — OpenWrt main + the NSS series, kernel 6.18.60 |
 | NSS packages | its feed `kuncy7/nss-packages`, branch `ipq50xx-rebase` |
 | board data | upstream mainline DTS, community QSDK DTS, the official BDF |
 
@@ -102,7 +102,7 @@ DSA port and VLAN a firmware VLAN interface so ECM can write rules for it.
 
 ```sh
 git clone -b c3po-tag-8021q https://github.com/kuncy7/openwrt-nss-edma.git openwrt
-cd openwrt && git checkout fb7e09acfea17c435338d9b631cbd33fc39c3c62 && cd ..
+# to reproduce a CI build: cd openwrt && git checkout <base_commit from build-info.txt>
 
 git clone https://github.com/azitak/openwrt-main-cmcc-rax3000q-nss.git rax3000q
 bash rax3000q/scripts/setup.sh ./openwrt
@@ -161,8 +161,8 @@ and an rc.local that loads `qca-nss-netlink` so `nssinfo` works.
 CI is **manual only**: Actions -> "Build CMCC RAX3000Q" -> Run workflow.
 Pushes and PRs do not trigger a build (one image costs ~90 minutes). Use
 `prepare_only` for a ~5 minute tree/config check, `make_release=false` to keep
-the images as artifacts only, and `base_ref` to change the baseline commit.
-The baseline is pinned because the NSS patches are tied to kernel 6.18.60.
+the images as artifacts only, and `base_ref` to pin the baseline commit.
+By default the baseline follows the head of c3po-tag-8021q on every build.
 
 ## Checking that the offload is on
 

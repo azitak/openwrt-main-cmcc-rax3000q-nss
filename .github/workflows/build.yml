@@ -4,9 +4,9 @@ name: Build CMCC RAX3000Q (main + NSS)
 # RAX3000Q / RAX3000-QY (IPQ5018 + QCA8337 + QCN6102, 256 MB RAM, 128 MB
 # SPI-NAND, Dosilicon DS35Q1GA or GigaDevice GD5F1GQ5REYIG).
 #
-# The baseline is pinned: openwrt-nss-edma is a moving branch that carries
-# ~200 upstream commits on top of OpenWrt main, and the NSS patches are tuned
-# to its exact kernel (6.18.60).  override `base_ref` to follow the branch.
+# The baseline follows the head of openwrt-nss-edma's c3po-tag-8021q branch
+# on every build; `base_ref` pins a commit when a reproducible build is
+# wanted.
 
 # Manual only.  A full image costs ~90 minutes of runner time, so pushes and
 # pull requests must NOT start one: go to Actions -> "Build CMCC RAX3000Q" ->
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       base_ref:
-        description: 'openwrt-nss-edma commit (empty = the pinned one)'
+        description: 'openwrt-nss-edma commit/branch (empty = latest c3po-tag-8021q)'
         required: false
         default: ''
       make_release:
@@ -32,8 +32,7 @@ on:
 
 env:
   BASE_REPO: https://github.com/kuncy7/openwrt-nss-edma.git
-  # c3po-tag-8021q, 2026-11-05: OpenWrt main 2026-10-09 + NSS on kernel 6.18.60
-  BASE_SHA: fb7e09acfea17c435338d9b631cbd33fc39c3c62
+  # Moving branch: every build takes its current head (kernel 6.18.60 today)
   BASE_BRANCH: c3po-tag-8021q
   # A preparation-only run checks the tree and .config in ~5 minutes instead
   # of discovering a dropped symbol after a 90-minute build.
@@ -86,20 +85,12 @@ jobs:
           git -C openwrt remote add origin "$BASE_REPO"
           if [ -n "${REF:-}" ]; then
             git -C openwrt fetch --quiet --depth 1 origin "$REF"
-            git -C openwrt checkout --quiet FETCH_HEAD
-          elif git -C openwrt fetch --quiet --depth 1 origin "$BASE_SHA" 2>/dev/null; then
-            git -C openwrt checkout --quiet FETCH_HEAD
           else
-            # GitHub refuses a by-SHA fetch for some repositories; the branch
-            # head is the same commit as long as it has not moved.
-            echo "::warning::by-SHA fetch failed, taking the head of $BASE_BRANCH instead"
             git -C openwrt fetch --quiet --depth 1 origin "$BASE_BRANCH"
-            git -C openwrt checkout --quiet FETCH_HEAD
           fi
+          git -C openwrt checkout --quiet FETCH_HEAD
           git -C openwrt log -1 --format='base %h  %ci  %s'
           echo "BASE_COMMIT=$(git -C openwrt rev-parse --short HEAD)" >>"$GITHUB_ENV"
-          [ "$(git -C openwrt rev-parse HEAD)" = "$BASE_SHA" ] ||
-            echo "::warning::base tree is not the pinned commit $BASE_SHA"
 
       - name: Prepare the tree
         # setup.sh applies the three source patches, installs the Dosilicon

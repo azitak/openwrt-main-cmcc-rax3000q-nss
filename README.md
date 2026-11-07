@@ -70,7 +70,7 @@ NSS-on-mainline 系列与 [kuncy7](https://github.com/kuncy7/openwrt-nss-edma) �
 
 | 部分 | 取自 | 说明 |
 |---|---|---|
-| OpenWrt 树 | `kuncy7/openwrt-nss-edma` 分支 `c3po-tag-8021q`，commit `fb7e09a` | OpenWrt main 2026-10-09 + NSS 系列，内核 6.18.60 |
+| OpenWrt 树 | `kuncy7/openwrt-nss-edma` 分支 `c3po-tag-8021q`（CI 默认跟随分支头） | OpenWrt main + NSS 系列，内核 6.18.60 |
 | NSS 包 | 该树的 feeds：`kuncy7/nss-packages` 分支 `ipq50xx-rebase` | `qca-nss-drv` / `ecm` / `clients` / `nss-firmware` / `sqm-scripts-nss` |
 | 板级数据 | 上游 mainline DTS + 社区 QSDK DTS + 官方 BDF | 见下 |
 
@@ -244,7 +244,7 @@ kconfig 符号（并显式禁止 `wpad-*` / `nss-tools` / USB / ext4 包被选�
 ```sh
 # 1) 基线：OpenWrt main + NSS（约 1.5 GB）
 git clone -b c3po-tag-8021q https://github.com/kuncy7/openwrt-nss-edma.git openwrt
-cd openwrt && git checkout fb7e09acfea17c435338d9b631cbd33fc39c3c62 && cd ..
+# 复现某次 CI 构建时：cd openwrt && git checkout <该次 build-info.txt 的 base_commit>
 
 # 2) 本仓库的板级适配
 git clone https://github.com/azitak/openwrt-main-cmcc-rax3000q-nss.git rax3000q
@@ -273,8 +273,8 @@ push / PR 都**不会**编译（一次完整镜像约 90 分钟，改文档不�
 - `make_release=false`：编译出固件并上传 artifact，但不发 Release；
 - `base_ref`：换基线 commit。
 
-默认编译并发布 Release（`build-YYYYMMDD_HHMMSS`）。基线是**按 commit 固定**的：
-NSS 补丁与 6.18.60 内核绑得很紧，跟着分支头跑容易踩空。
+默认编译并发布 Release（`build-YYYYMMDD_HHMMSS`）。基线默认**跟随 `c3po-tag-8021q`
+分支头**（每次构建取上游最新）；需要可复现时用 `base_ref` 固定 commit。
 
 ---
 

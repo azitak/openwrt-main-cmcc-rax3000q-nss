@@ -13,15 +13,13 @@
 | **`kuncy7/openwrt-nss-edma` `c3po-tag-8021q`** | **6.18.60** | stmmac claim API + `qca-dwmac-nss` + `qca8337-nss`（dts）+ `qca-dsa-nss` | **采用**：它就是"OpenWrt main + NSS"，已经过 15+ 台 IPQ5018 实测 |
 
 该基线的 `README.ipq50xx.md` 记录了这条路的每一个坑（arm 时序、DSA tagger、
-wifili 需要 mode 2、256 MB 板型的四个调整），本仓库逐条对照。固定 commit：
+wifili 需要 mode 2、256 MB 板型的四个调整），本仓库逐条对照。
 
-```
-fb7e09acfea17c435338d9b631cbd33fc39c3c62   2026-11-05
-base：OpenWrt main 2026-10-09（JuliusBairaktaris nss-edma-rework 的 vendor-nss-archive）
-```
-
-**为什么必须钉 commit**：NSS 补丁与 6.18.60 内核、mac80211/ath11k 的 backports 版本
-绑得很紧；跟着分支头跑，某天上游 rebase 一次，补丁就可能全废。
+CI 默认跟随分支头构建；最近一次完整真机验证的基线是
+`fb7e09acfea17c435338d9b631cbd33fc39c3c62`（2026-11-05，OpenWrt main 2026-10-09）。
+需要复现某次构建时，用 workflow 的 `base_ref` 指定该次 `build-info.txt` 里的
+`base_commit`。NSS 补丁与 6.18.60 内核、mac80211/ath11k 的 backports 绑得很紧，
+上游 rebase 后可能需要同步更新补丁（`0001` 的 DTS/image.mk 部分最需要关注）。
 
 ## 2. 与 mufeng05 项目的对应关系
 
