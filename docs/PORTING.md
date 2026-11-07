@@ -308,9 +308,35 @@ workflow release-notes 里"fullcone 默认关闭""尚未编译验证"等过期�
 wpad-* 不在。其余内存优化方向（zram、conntrack 调小、NSS/M3 region 压缩）见
 当轮讨论记录，未在本轮实施。
 
+## 5f. 审计修复镜像的真机复测与 NSS 参数体检（build-20261107_141736）
+
+8 个文件的审计修复 + `0001` 补丁头手术合入 `6ccddcd`，CI 产出
+`build-20261107_141736`（`build-info.txt` 实证 `project_commit=6ccddcd`、
+`base_commit=fb7e09a`）。刷入后做了一轮只读复测，并对 NSS 参数做体检：
+
+| 项 | 实测 |
+|---|---|
+| NSS 拓扑 | `nss.general.topology='dsa'` 生效：conduit tag 走 `qca-8021q`，`qca-dsa-nss` 为 wan（if_num 29）/ lan1（31）建固件 VLAN 节点，`alloc_failures=0` |
+| NSS 转发 | `nssinfo ipv4`：core0 `eth_rx` 1.29 亿包、`ipv4` 1.28 亿包，**Drops 全 0**；回 CPU 的 exceptions 占比约 0.26% |
+| ECM | `accelerated_count=71`（tcp 62 / udp 9），`stats_request success=96000 fail=0`，pending 0/0 |
+| ath11k 实参 | `/sys/module/ath11k/parameters/nss_offload=1`、`frame_mode=2`（wifili 以太帧模式生效） |
+| fullcone | `defaults.fullcone='1'` + wan zone `fullcone='1'` → `dstnat_wan` / `srcnat_wan` 各一条 fullcone 规则，与 NSS/ECM 共存 |
+| 连通 | WAN DHCP 192.168.2.165；网关 ping 1.2 ms、公网 ping 46 ms 0% 丢包 |
+| 内存/温度 | MemAvailable 40.8 MB（zram swap 仅用 2.2 MB），四温区 59–60 °C，load ~0.17 |
+| 参数基线 | `max_ipv4/6_conn=512`（默认池，超限回落 CPU 慢路径）、8 MiB NSS DDR（LOW profile）、retail 12.5 固件、`fw_csum` off —— 256 MB 板现阶段不建议动 |
+
+顺带定音的三条无害噪音：procd 找不到 `firmware-2.bin`（ath11k 实际用
+`q6_fw.mbn`，固件 WLAN.HK.2.7.0.1 加载成功）、`modprobe ath11k_pci` 失败
+（本板 AHB 无 PCI 形态）、nssinfo `Unknown message type 1`（诊断工具 12.5
+走在 drv 14.0 的广播消息之前，版本兼容噪音；其 ncurses UI 需要 tty，
+`ssh -t` 进去即可看）。文档同步：wireless / config 注释按本次实测更新
+（hostapd 是单一全局进程 `hostapd -s -g` 管理 BSS，11k 邻居表按 radio 独立；
+HE80 相对 HE160 是峰速减半，不是少 1/3）。
+
 ## 6. 已知风险
 
-- **wifili 已在本板验证**（5G HE160 关联、流量走 NSS 路径）：单 rproc + PD 2 的
+- **wifili 已在本板验证**（5G HE160 站点关联 1921.5 Mbit/s、4300 万包 TX 走
+  NSS，`nss_offload=1` / `frame_mode=2` 实值确认，见 5f）：单 rproc + PD 2 的
   写法连同这块板自己的 `boot-args`（PD 2、reset GPIO 27）和 BDF 都已真机跑通。
   余量相关的提醒：256 MB 内存档位下 VDEV/peer 数量受 mode 2 限制；若 wifili
   起不来，射频留在主机栈，路由不受影响。

@@ -1,12 +1,10 @@
 # Shipped by this build.  Upstream main ships a zero-length wireless config and
 # leaves both radios disabled; this one comes up ready to associate.
 #
-# The image carries the FULL hostapd (hostapd-mbedtls), not the basic build.
-# Verified on the device with `hostapd -t`: the basic build accepts the
-# 802.11k RRM keys and the 802.11r FT keys, but rejects `bss_transition` and
-# `wnm_sleep_mode` (802.11v) as "unknown configuration item".  The full
-# build enables WNM, so 11k / 11v / 11r are all compiled in.  No wpa_supplicant
-# is shipped: this board is AP-only.
+# The image carries hostapd-mbedtls, the full build: 11k / 11v / 11r are all
+# compiled in (the basic one rejects 802.11v's `bss_transition` /
+# `wnm_sleep_mode`; evidence in docs/PORTING.md 5c).  No wpa_supplicant is
+# shipped: this board is AP-only.
 #
 # OPEN NETWORK BY DESIGN (same as the 25.12 build of this board): add a password
 # before using it anywhere that matters, e.g.
@@ -23,8 +21,11 @@
 # also on the open network.
 #
 # country CN keeps the 5 GHz radio legal and gives it a 160 MHz channel.
-# Channel 36 / HE160 overlaps DFS, so hostapd runs a ~60 s CAC on the first
-# boot before the 5 GHz beacon appears; HE80 avoids that at ~1/3 less throughput.
+# Channel 36 / HE160 (center 50) crosses the CH52-64 DFS band, so the first
+# boot runs a ~60 s CAC before the 5 GHz beacon appears; HE80 avoids that
+# but halves the peak rate.
+# Verified on device (2026-11-07): both radios up, a station associated at
+# HE-MCS 9 / 1921.5 Mbit/s on the 5 GHz one.
 
 config wifi-device 'radio0'
 	option type 'mac80211'
@@ -71,9 +72,10 @@ config wifi-iface 'default_radio1'
 	option mode 'ap'
 	option ssid 'RAX3000Q-5G'
 	option encryption 'none'
-	# Same 11k / 11v / 11r set as the 2.4 GHz BSS.  The radios are separate
-	# hostapd processes: 11k is active on both, but the two neighbour tables
-	# are maintained independently.
+	# Same 11k / 11v / 11r set as the 2.4 GHz BSS.  Both BSSes run inside one
+	# global hostapd process (verified live: `/usr/sbin/hostapd -s -g
+	# /var/run/hostapd/global`); each radio still keeps its own 11k
+	# neighbour table.
 	option ieee80211k '1'
 	option rrm_neighbor_report '1'
 	option rrm_beacon_report '1'

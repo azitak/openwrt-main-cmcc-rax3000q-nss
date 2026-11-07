@@ -5,7 +5,9 @@
 # firewall4 (patched by this project) reads defaults.fullcone as the global
 # gate and zone.fullcone as the per-zone switch; both must be on.  If the
 # kernel lacks the fullcone expression, fw4 turns the gate off by itself
-# with a warning, so this can never break the ruleset.
+# with a warning, so this can never break the ruleset.  Verified on device
+# (build-20261107_141736): the ruleset carries a fullcone rule in both
+# dstnat_wan and srcnat_wan.
 #
 # uci-defaults run once per image (also after a keep-config sysupgrade),
 # which is the intended "factory default" behaviour: a user who turns

@@ -16,12 +16,14 @@
    在 PZ-L8（同 SoC、同交换机）上跑通的 NSS 方案，在 main 上落成当前唯一可行的那条路：
    **保留上游 stmmac 驱动，用一小块 glue 模块把 GMAC 的数据面交给 NSS 固件**。
 
-> **状态：镜像已在真机完整验证**——Dosilicon、UBI、DSA/WAN、NSS 硬件加速（ECM 计数随
-> 真实流量增长）、双射频（5G HE160 关联成功）、11k/v/r、LuCI/Argon、USTC apk 源全部通过。
-> 最新一轮改动：fullcone NAT 改为**默认开启**（已在真机确认与 NSS/ECM 共存正常）、
-> nssinfo 修复（不再对内核没编的 netlink 族报错，退出不再 SIGABRT）。
-> 与上一代（v25.12.5 基线）确认过的事实对齐：闪存是 Dosilicon、ECC 必须 4/512、
-> bootargs 需要 `ubi.mtd=rootfs`。刷机前**务必备份全部分区**，尤其是 `0:art`。
+> **状态：镜像已在真机完整验证（审计修复镜像 `build-20261107_141736` 复测，
+> 见 [docs/PORTING.md](docs/PORTING.md) 5f）**——Dosilicon/UBI、DSA+WAN、
+> NSS 加速（71 流实时卸载、核心面 1.29 亿包零丢）、双射频（5G HE160 实测关联
+> 1921.5 Mbit/s、wifili 走 NSS）、11k/v/r、fullcone（默认开启且与 NSS/ECM
+> 共存正常）、nssinfo 修复、LuCI/Argon、USTC apk 源全部通过。
+> 与上一代（v25.12.5 基线）确认过的板级事实不变：闪存为 Dosilicon 或
+> GigaDevice、ECC 必须 4/512、bootargs 需要 `ubi.mtd=rootfs`。刷机前
+> **务必备份全部分区**，尤其是 `0:art`。
 
 ---
 
@@ -371,12 +373,13 @@ top                     # 满速转发时 idle > 90%
 
 ## 已知限制（诚实版）
 
-- **Wi-Fi offload（wifili）已在真机验证**：5G HE160 关联成功、流量走 NSS 路径
-  （`logread -e nss` 的 "Wi-Fi on the NSS path"）。留意两点：mode 2 + 256M 档位
-  会减少固件可创建的 VDEV/peer 数量（补丁 `903`，配合 `ATH11K_MEM_PROFILE_256M`
-  才能在 256 MB 里同时容纳两个射频与 NSS；上游按 512 MB 档位编译，因此把 wifi
-  关掉了）；若 wifili 起不来，两个射频会留在主机协议栈上（ath11k 的握手失败会
-  打日志），路由不受影响。
+- **Wi-Fi offload（wifili）已在真机验证**：5G HE160 站点关联 1921.5 Mbit/s
+  （HE-MCS 9 / 160 MHz）、流量走 NSS 路径（`logread -e nss` 的
+  "Wi-Fi on the NSS path"，`nss_offload=1` / `frame_mode=2` 实值确认）。
+  留意两点：mode 2 + 256M 档位会减少固件可创建的 VDEV/peer 数量（补丁 `903`，
+  配合 `ATH11K_MEM_PROFILE_256M` 才能在 256 MB 里同时容纳两个射频与 NSS；
+  上游按 512 MB 档位编译，因此把 wifi 关掉了）；若 wifili 起不来，两个射频
+  会留在主机协议栈上（ath11k 的握手失败会打日志），路由不受影响。
 - **sysupgrade 用的是上游 main 的路径**（`cmcc,rax3000q` 与 PZ-L8 同组，
   `elecom_upgrade_prepare` + `nand_do_upgrade`）。上一代项目为了兼容原厂 U-Boot
   改成过 `CI_UBIPART="rootfs"`；本仓库跟随上游。首版镜像已由用户通过 U-Boot TFTP
