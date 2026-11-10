@@ -355,9 +355,11 @@ check 'CONFIG_PACKAGE_luci=y'
 check 'CONFIG_PACKAGE_luci-theme-argon=y'
 check 'CONFIG_PACKAGE_luci-app-upnp=y'
 check 'CONFIG_PACKAGE_luci-i18n-base-zh-cn=y'
-# full hostapd is what enables 802.11v; no wpad at all (AP-only board)
-check 'CONFIG_PACKAGE_hostapd-mbedtls=y'
-forbid 'CONFIG_PACKAGE_wpad-mbedtls=y'
+# wpad-mbedtls is the full variant (802.11s mesh + 802.11v); only one
+# hostapd/supplicant provider may be selected - they conflict
+check 'CONFIG_PACKAGE_wpad-mbedtls=y'
+forbid 'CONFIG_PACKAGE_hostapd-mbedtls=y'
+forbid 'CONFIG_PACKAGE_wpad-mesh-mbedtls=y'
 forbid 'CONFIG_PACKAGE_wpad-basic-mbedtls=y'
 # nss-tools (the ipq807x/ipq60xx variant) is @BROKEN here and conflicts with
 # nss-tools-dwmac.  The luci meta package must not resurrect it.

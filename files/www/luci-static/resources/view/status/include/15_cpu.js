@@ -6,8 +6,6 @@
 var ZH = String(document.documentElement.lang || '').toLowerCase().indexOf('zh') === 0;
 function t(en, zh) { return ZH ? zh : en; }
 
-var prev = null;
-
 function parseCpu(text) {
 	var cpus = {};
 
@@ -24,9 +22,8 @@ function parseCpu(text) {
 }
 
 function sample() {
-	return fs.read('/proc/stat').then(function(text) {
-		return parseCpu(text);
-	});
+	/* fs.read 在 RPC 失败时会静默回退为空串，这里兜住剩余的 reject 路径 */
+	return L.resolveDefault(fs.read('/proc/stat'), '').then(parseCpu);
 }
 
 function usage(cur, old) {
@@ -44,67 +41,64 @@ function usage(cur, old) {
 
 	var dt = total - ptotal, di = idle - pidle;
 
-	if (dt <= 0)
-		return null;
-
-	return 100 * (dt - di) / dt;
+	/* tickless idle 下整窗可能没有任何 tick 增量：视为 0% */
+	return (dt <= 0) ? 0 : 100 * (dt - di) / dt;
 }
 
-function collect() {
-	return sample().then(function(cur) {
-		if (prev) {
-			var dt = (Date.now() - prev.t) / 1000;
-			var usage_map = {};
+function calcUsage(cur, old) {
+	var out = {};
 
-			if (dt >= 1) {
-				Object.keys(cur).forEach(function(k) {
-					if (prev.cpus[k]) {
-						var u = usage(cur[k], prev.cpus[k]);
+	Object.keys(cur).forEach(function(k) {
+		if (old[k]) {
+			var u = usage(cur[k], old[k]);
 
-						if (u != null)
-							usage_map[k] = u;
-					}
-				});
-			}
-
-			prev = { t: Date.now(), cpus: cur };
-			return { usage: usage_map };
+			if (u != null)
+				out[k] = u;
 		}
+	});
 
-		/* 首次加载：等 1.2 s 再采一次（tickless idle 下 500ms 可能无 tick 增量）*/
+	return out;
+}
+
+/* 官方卡片均为无状态设计：index.js 每个轮询周期都重新调用 load()，
+ * render() 是 load() 数据的纯函数。占用率由 /proc/stat 两次采样的
+ * tick 增量差分而来，因此把完整测量窗封闭在单次 load() 内，不保留
+ * 任何跨周期基线——刷新、解除隐藏、跳页返回、后台切回，首帧均为
+ * 当次实测的占用率。窗口取 1.2 s：tickless idle 下短窗口可能没有
+ * tick 增量。 */
+function measure() {
+	return sample().then(function(cur) {
 		return new Promise(function(resolve) {
 			setTimeout(function() {
 				sample().then(function(next) {
-					var usage_map = {};
-
-					Object.keys(next).forEach(function(k) {
-						if (cur[k]) {
-							var u = usage(next[k], cur[k]);
-
-							if (u != null)
-								usage_map[k] = u;
-						}
+					resolve({
+						usage: Object.keys(next).length > 0 ? calcUsage(next, cur) : {},
+						empty: Object.keys(next).length == 0
 					});
-
-					prev = { t: Date.now(), cpus: next };
-					resolve({ usage: usage_map });
 				});
 			}, 1200);
 		});
 	});
 }
 
-/* 一行一个进度条：左标签、右百分比，与首页“内存”卡片同构 */
+/* 官方“内存”/“存储”卡片同款进度条 helper：title 显示 "x / y (z%)" */
+function progressbar(value, max) {
+	var vn = parseInt(value) || 0, mn = parseInt(max) || 100,
+	    fv = value, fm = max, pc = Math.floor((100 / mn) * vn);
+
+	return E('div', { 'class': 'cbi-progressbar',
+	                  'title': '%s / %s (%d%%)'.format(fv, fm, pc) },
+		E('div', { 'style': 'width:%.2f%%'.format(pc) }));
+}
+
+/* 一行一个进度条：左标签、右进度条；无数据时按官方 30_network 卡的
+ * 惯例显示 ? */
 function renderRow(label, pct) {
 	var has = (pct != null && !isNaN(pct));
-	var v = has ? pct : 0;
 
 	return E('tr', { 'class': 'tr' }, [
 		E('td', { 'class': 'td left', 'width': '25%' }, label),
-		E('td', { 'class': 'td left' },
-			E('div', { 'class': 'cbi-progressbar', 'style': 'width:100%',
-			           'title': has ? '%.1f%%'.format(v) : '—' },
-				E('div', { 'style': 'width:%.1f%%'.format(Math.min(v, 100)) })))
+		E('td', { 'class': 'td left' }, has ? progressbar(pct.toFixed(1), 100) : '?')
 	]);
 }
 
@@ -112,18 +106,21 @@ return baseclass.extend({
 	title: t('CPU usage', 'CPU 占用'),
 
 	load: function() {
-		return collect();
+		return measure();
 	},
 
 	render: function(s) {
-		if (!s)
-			return E('em', {}, t('Collecting data…', '正在采集数据…'));
+		/* /proc/stat 完全读不到：返回 null 让上层保留上一帧 DOM */
+		if (!s || s.empty)
+			return null;
+
+		var u = s.usage || null;
 
 		var table = E('table', { 'class': 'table' });
 
-		table.appendChild(renderRow(t('Total', '总计'), s.usage['cpu']));
-		table.appendChild(renderRow('cpu0', s.usage['cpu0']));
-		table.appendChild(renderRow('cpu1', s.usage['cpu1']));
+		table.appendChild(renderRow(t('Total', '总计'), u ? u['cpu'] : null));
+		table.appendChild(renderRow('cpu0', u ? u['cpu0'] : null));
+		table.appendChild(renderRow('cpu1', u ? u['cpu1'] : null));
 
 		return table;
 	}
