@@ -248,12 +248,12 @@ jobs:
             for p in nss-tools-dwmac nss-firmware kmod-qca-dwmac-nss \
                      kmod-qca-nss-drv kmod-qca-nss-ecm kmod-qca8337-nss \
                      ath11k-firmware-ipq5018-qcn6122 ipq-wifi-cmcc_rax3000q \
-                     hostapd-mbedtls; do
+                     wpad-mbedtls; do
               grep -q "^$p " "$M" || { echo "::error::$p is not in the image"; exit 1; }
             done
-            for p in kmod-usb3 kmod-fs-ext4 e2fsprogs wpad-mbedtls wpad-basic-mbedtls; do
+            for p in kmod-usb3 kmod-fs-ext4 e2fsprogs hostapd-mbedtls wpad-basic-mbedtls; do
               if grep -q "^$p " "$M"; then
-                echo "::error::$p must not be in the image (no USB port / UBIFS rootfs / AP-only)"
+                echo "::error::$p must not be in the image (no USB port / UBIFS rootfs / single hostapd provider)"
                 exit 1
               fi
             done
