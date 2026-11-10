@@ -309,9 +309,11 @@ workflow release-notes 里"fullcone 默认关闭""尚未编译验证"等过期�
    注：USB/ext4 在内核里本来就是 `is not set`（=m 全因 kmod 包拉起），
    剔包后内核侧无需再动。
 
-预期合计：常驻 RAM 省约 4-5 MiB，flash 省约 3 MiB。（manifest 校验的口径
-随后有变：2026-11-10 起要求 wpad-mbedtls 在、hostapd-mbedtls / wpad-basic-
-mbedtls / kmod-usb3 / kmod-fs-ext4 / e2fsprogs 不在，见 5c 决策链。）
+预期合计：常驻 RAM 省约 4-5 MiB，flash 省约 3 MiB。manifest 包清单校验
+（build.yml 曾按本轮口径翻转为 wpad-mbedtls 在、hostapd-mbedtls /
+wpad-basic-mbedtls 不在）于 2026-11-10 从 CI 整段移除——包的正确性由
+构建前 `setup.sh` 的 check/forbid 一处把守，产物侧只保留 sysupgrade /
+factory.ubi 两个文件的存在性检查（`.manifest` 仍随产物归档备查）。
 其余内存优化方向（zram、conntrack 调小、NSS/M3 region 压缩）见
 当轮讨论记录，未在本轮实施。
 
