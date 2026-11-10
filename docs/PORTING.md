@@ -44,7 +44,7 @@ CI 默认跟随分支头构建；最近一次完整真机验证的基线是
 ```make
 DEVICE_PACKAGES := ath11k-firmware-ipq5018-qcn6122 \
 	ipq-wifi-cmcc_rax3000q \
-	-wpad-basic-mbedtls -wpad-mbedtls hostapd-mbedtls \
+	-wpad-basic-mbedtls wpad-mbedtls \
 	-kmod-usb3 -kmod-usb-dwc3 -kmod-usb-dwc3-qcom \
 	-e2fsprogs -kmod-fs-ext4 -losetup
 ```
@@ -136,7 +136,8 @@ CONFIG_NSS_MEM_PROFILE_LOW=y               CONFIG_PACKAGE_ipq-wifi-cmcc_rax3000q
 加上文件存在性、Dosilicon 补丁内容（`DS35Q1GA` / 厂商 ID）、DTS 的
 4-bit ECC / `ubi.mtd=rootfs` / NSS include、caldata 两条规则与偏移、
 11k/v/r 选项、USTC 源、fullcone 默认开启、nssinfo feed 补丁、LuCI 与中文包，
-并显式禁止 `wpad-*` / `nss-tools` / USB / ext4 包被选回。
+并显式禁止 `hostapd-mbedtls` / `wpad-basic-mbedtls` / `wpad-mesh-mbedtls` /
+`nss-tools` / USB / ext4 包被选回（`wpad-mbedtls` 必选）。
 完整清单以 `setup.sh` 为准。
 
 ## 4. 本地已经验证的
@@ -214,7 +215,11 @@ URL（`CONFIG_FEED_nss=m` 修）；`nssinfo` 全组 `-22` 是 `qca-nss-netlink.k
 ath79 多处现成用例），wireless 配置里补齐 11k/11v/11r 选项。
 （当时的口径是换全功能 `wpad-mbedtls`；后按 5e 的内存审计收窄为只带
 `hostapd-mbedtls`——本板没有 station/roaming 场景，`wpa_supplicant` 二进制
-常驻属纯浪费，最终镜像以第 49 行的包列表为准，见 5e。）
+常驻属纯浪费。2026-11-10 为 802.11s mesh 最终改回 full `wpad-mbedtls`：
+meshif 需要 wpa_supplicant，只有 full wpad 两样齐，mesh 变体映射同一份
+full hostapd .config，11k/v/r + SAE 全保留，代价是 supplicant 常驻约 3 MiB。
+决策链 basic → hostapd-mbedtls → wpad-mbedtls，以 3.1 节的包列表为准，
+反转细节见 5e 追记。）
 wifi-scripts `iface_roaming()` 有 `if (!ieee80211r || wpa < 2) return`，
 所以保持开放网络时 11r 惰性、加密码后自动生效（用户选择保持开放）。
 
@@ -287,6 +292,9 @@ workflow release-notes 里"fullcone 默认关闭""尚未编译验证"等过期�
    `wpad-mbedtls` 同为 full-mbedtls 变体、共用 `hostapd-full.config`
    （`CONFIG_WNM=y` / `CONFIG_IEEE80211R=y`），特性完全一致，只少一个二进制。
    5c 的 `hostapd -t` 结论沿用。
+   **2026-11-10 反转**：为 802.11s mesh 改回 full `wpad-mbedtls`——meshif
+   需要 wpa_supplicant，只有 full wpad 两样齐（决策链见 5c）。本条瘦身在
+   mesh 需求面前让位；其余两条（剔 USB/ext4、内核裁剪）不受影响。
 2. **剔除 USB + ext4 全家**：`qualcommax/Makefile` 的 `DEFAULT_PACKAGES` 给所有
    ipq50xx 机型强塞 `kmod-usb3`/`dwc3`/`kmod-fs-ext4`/`e2fsprogs`/`losetup`，
    本板无 USB 口、rootfs 是 UBIFS。这些 kmod 被 `/etc/modules.d` 自动加载
@@ -301,9 +309,10 @@ workflow release-notes 里"fullcone 默认关闭""尚未编译验证"等过期�
    注：USB/ext4 在内核里本来就是 `is not set`（=m 全因 kmod 包拉起），
    剔包后内核侧无需再动。
 
-预期合计：常驻 RAM 省约 4-5 MiB，flash 省约 3 MiB，manifest 校验
-（build.yml）现在要求 hostapd-mbedtls 在、kmod-usb3/kmod-fs-ext4/e2fsprogs/
-wpad-* 不在。其余内存优化方向（zram、conntrack 调小、NSS/M3 region 压缩）见
+预期合计：常驻 RAM 省约 4-5 MiB，flash 省约 3 MiB。（manifest 校验的口径
+随后有变：2026-11-10 起要求 wpad-mbedtls 在、hostapd-mbedtls / wpad-basic-
+mbedtls / kmod-usb3 / kmod-fs-ext4 / e2fsprogs 不在，见 5c 决策链。）
+其余内存优化方向（zram、conntrack 调小、NSS/M3 region 压缩）见
 当轮讨论记录，未在本轮实施。
 
 ## 5f. 审计修复镜像的真机复测与 NSS 参数体检（build-20261107_141736）
@@ -330,6 +339,36 @@ wpad-* 不在。其余内存优化方向（zram、conntrack 调小、NSS/M3 regi
 `ssh -t` 进去即可看）。文档同步：wireless / config 注释按本次实测更新
 （hostapd 是单一全局进程 `hostapd -s -g` 管理 BSS，11k 邻居表按 radio 独立；
 HE80 相对 HE160 是峰速减半，不是少 1/3）。
+
+## 5g. 首页状态卡片：无状态重写 + Web 文件缓存键（2026-11-10）
+
+LuCI 首页 14 张卡片里，自制三张（`15_cpu` / `16_net` / `17_nss`）曾把差分
+基线存在模块变量里跨轮询复用——这是「页面刷新、卡片解除隐藏、SPA 跳页返回、
+后台标签切回后，首帧显示陈旧的长窗平均值或闪 0」的根因。官方 include
+（10_system / 20_memory / 60_wifi 等 9 张）与固件自带的 18_thermal / 19_zram
+全部无状态：`index.js` 每个轮询周期重新调 `load()`，`render()` 是 `load()`
+数据的纯函数。
+
+按同一契约重写三张卡（squash 提交 `92c0276`）：
+
+- 测量窗封闭在单次 `load()` 内，模块零状态：CPU 两次采样 `/proc/stat`
+  （1.2 s 窗——tickless idle 短窗可能没有 tick 增量，整窗零增量改判 0%，
+  这是无状态下的正确语义而非坏轮）；网速 1 s 窗差分 ubus
+  `network.device status`（与官方「端口状态」卡同款调用）；NSS 吞吐 1 s 窗
+  读两次 `/sys/kernel/debug/qca-nss-drv/stats/ipv4` 差分。任何首帧都是
+  当次实测。
+- 缺数据占位符 `—` 改 `?`（官方 10_system / 20_memory 惯例）；速率单位用
+  NBSP（60_wifi 惯例）。
+- 真机验证：三文件部署 md5 双端一致；页内直调 `load()` 返回当次实测；
+  合成数据驱动 `render()` 全分支（满数据 / 缺数据 / 读不到返回 null）通过。
+- 期间一并查明的非代码问题：「网速卡内容消失」实为浏览器 localStorage 里
+  该卡被用户隐藏（状态页「显示」菜单勾选即自愈）。
+
+**运维注记（缓存键）**：`/www` 下模块的 URL 带 `?v=<resource_version>`，
+取自设备 `/usr/share/ucode/luci/version.uc` 的 `revision`（纯文本，可直接
+sed）。每次改动设备上的 Web 文件都要掀一版（当前 `.r4`），否则老浏览器会
+命中缓存的旧模块；该文件不在仓库跟踪范围内，属设备侧开关。随镜像刷入的
+`files/www` 文件不受此影响（镜像版本本身即为缓存键变更）。
 
 ## 6. 已知风险
 

@@ -29,7 +29,7 @@ things upstream does not give you:
 1. `openwrt/0001-*.patch` + `0002-*.patch` + `0003-*.patch` — edits to files the
    baseline ships:
    `image/ipq50xx.mk` (`DEVICE_PACKAGES` gains the ath11k firmware, the board
-   BDF, `-wpad-basic-mbedtls -wpad-mbedtls hostapd-mbedtls`, and negatives for
+   BDF, `-wpad-basic-mbedtls wpad-mbedtls`, and negatives for
    the subtarget's USB/ext4 DEFAULT_PACKAGES), the board DTS (NSS include,
    4-bit ECC, `ubi.mtd=rootfs`, `coherent_pool=512K`, 8 MiB NSS region, both
    radios `okay` with `ath11k-fw-memory-mode = <2>` and the baseline's single
@@ -44,10 +44,13 @@ things upstream does not give you:
    after `feeds install`.
 4. `files/` — the shipped wireless config (11k/11v/11r), the USTC apk mirror,
    a first-boot repair for kept-config upgrades, a uci-defaults script that
-   enables fullcone NAT, and an rc.local that loads `qca-nss-netlink` so
-   `nssinfo` works.
+   enables fullcone NAT, an rc.local that loads `qca-nss-netlink` so
+   `nssinfo` works, and three custom LuCI overview cards (`15_cpu` / `16_net`
+   / `17_nss`) that follow the stock cards' stateless `load()`/`render()`
+   contract.
 5. `config/cmcc_rax3000q.config` — 256M group, NSS/ECM + wifili, firmware 12.5,
-   SQM (off by default), full `hostapd-mbedtls` (no wpad - AP-only board), `luci` + argon + UPnP + four
+   SQM (off by default), full `wpad-mbedtls` (802.11s mesh needs its
+   supplicant half; `hostapd-mbedtls` is excluded), `luci` + argon + UPnP + four
    zh_Hans i18n packages, `zram-swap`, and the USTC `VERSION_REPO`.
 6. `scripts/setup.sh` + `.github/workflows/build.yml` — apply all of the above
    to a clean baseline and verify every boot-critical piece before spending 90
@@ -72,13 +75,16 @@ using it anywhere that matters: `uci set wireless.default_radio0.encryption='sae
 `set ... .key='your-key'`, repeat for `default_radio1`, then
 `uci commit wireless && wifi reload`.
 
-The image carries the FULL `hostapd-mbedtls` (no wpad at all - the board is
-AP-only, so a supplicant would just idle). This was decided after a
-`hostapd -t` probe on the real device: the basic build accepts the 802.11k
+The image carries the FULL `wpad-mbedtls` (not basic). This was decided after
+a `hostapd -t` probe on the real device: the basic build accepts the 802.11k
 RRM keys and the 802.11r FT keys, but rejects `bss_transition` /
-`wnm_sleep_mode` (802.11v) as "unknown configuration item". The full build
-enables WNM, so 11k/11v/11r are all compiled in and all three are present in
-the shipped wireless config.
+`wnm_sleep_mode` (802.11v) as "unknown configuration item", so the image
+first moved to full `hostapd-mbedtls`; on 2026-11-10 it moved back to full
+`wpad-mbedtls` because 802.11s mesh needs the wpa_supplicant half that only
+wpad ships. The mesh variant maps to the same full hostapd .config, so
+11k/11v/11r + SAE are all compiled in and all three are present in the
+shipped wireless config; the cost is a resident supplicant (~3 MiB). The
+decision chain is documented in docs/PORTING.md (5c/5e).
 802.11r needs encryption: wifi-scripts' `iface_roaming()` returns early unless
 wpa >= 2, so while the SSIDs are open the FT options are inert; add a key and
 FT-PSK/FT-SAE becomes active with no other change. 11k and 11v work already.
