@@ -115,6 +115,14 @@ jobs:
           grep -q 'ipq5018-nss.dtsi' "$DTS" || { echo "::error::the board has no NSS node"; exit 1; }
           echo "Dosilicon driver, 4-bit ECC, UBI bootargs and the NSS node are in place"
 
+      - name: Compute the cache period key
+        id: cacheperiod
+        # A key unique to each workflow run never matched on restore, so
+        # every successful run archived a full copy of the caches.  Rotate
+        # weekly instead: the first run of an ISO week saves, later runs
+        # that week restore it and actions/cache skips the redundant save.
+        run: echo "week=$(date -u +%G-W%V)" >>"$GITHUB_OUTPUT"
+
       - name: Restore the download cache (dl/)
         if: env.PREPARE_ONLY != 'true'
         # First successful run fills this cache; later runs pull the source
@@ -124,7 +132,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt/dl
-          key: openwrt-dl-${{ github.run_id }}
+          key: openwrt-dl-${{ steps.cacheperiod.outputs.week }}
           restore-keys: |
             openwrt-dl-
 
@@ -191,7 +199,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: openwrt/.ccache
-          key: ${{ steps.ccache.outputs.prefix }}${{ github.run_id }}
+          key: ${{ steps.ccache.outputs.prefix }}${{ steps.cacheperiod.outputs.week }}
           restore-keys: ${{ steps.ccache.outputs.prefix }}
 
       - name: Build
@@ -221,7 +229,8 @@ jobs:
             echo "base_repo=$BASE_REPO"
             echo "base_commit=$BASE_COMMIT"
             echo "project_commit=$(git -C "$GITHUB_WORKSPACE/rax3000q" rev-parse --short HEAD)"
-            echo "kernel=6.18.60"
+            KVER=$(basename "$(ls -d build_dir/target-*/linux-qualcommax_ipq50xx/linux-* | tail -n 1)")
+            echo "kernel=${KVER#linux-}"
             echo "nss_firmware=$(grep -m1 '^CONFIG_NSS_FIRMWARE_VERSION' .config | cut -d= -f1 | sed 's/.*VERSION_//')"
             echo "mem_profile=nss LOW / ath11k 256M"
             echo "bdf_ipq5018_sha256=$(sha256sum "$GITHUB_WORKSPACE/rax3000q/openwrt/tree/package/ipq-wifi-cmcc_rax3000q/files/board-2.bin.IPQ5018" | cut -d' ' -f1)"
