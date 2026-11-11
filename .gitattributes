@@ -5,4 +5,6 @@
 *.bin binary
 *.ipq5018 binary
 *.qcn6122 binary
+*.IPQ5018 binary
+*.QCN6122 binary
 *.lmo binary
