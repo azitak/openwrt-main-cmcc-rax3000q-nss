@@ -83,7 +83,8 @@ function diffRates(old4, next4, ms) {
 
 function build(r, next4, ms) {
 	var status = r[0] || '';
-	var ipv4 = next4;
+	/* 第二次采样失败时绝对计数退回首次采样：吞吐行按 '?' 显示，其余行保持 */
+	var ipv4 = (next4.ipv4_rx_pkts != null) ? next4 : r[3];
 	var ipv6 = parseStats(r[4]);
 	var rates = diffRates(r[3], next4, ms);
 
