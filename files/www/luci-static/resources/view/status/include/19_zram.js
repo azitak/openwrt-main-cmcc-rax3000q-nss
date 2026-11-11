@@ -11,7 +11,7 @@ var BASE = '/sys/devices/virtual/block/zram0';
 
 function fmtBytes(b) {
 	if (b == null || isNaN(b))
-		return '—';
+		return '?';
 	var u = [ 'B', 'KiB', 'MiB', 'GiB', 'TiB' ], i = 0;
 	while (Math.abs(b) >= 1024 && i < u.length - 1) {
 		b /= 1024;
@@ -51,16 +51,16 @@ return baseclass.extend({
 			return E('em', {}, t('zram is not active', 'zram 未启用'));
 
 		var mm = z.mm;
-		var ratio = (mm[0] > 0 && mm[1] > 0) ? (mm[0] / mm[1]).toFixed(1) + '×' : '—';
+		var ratio = (mm[0] > 0 && mm[1] > 0) ? (mm[0] / mm[1]).toFixed(1) + '×' : '?';
 
 		var rows = [
-			[ t('Device size', '设备容量'), z.disk ? fmtBytes(z.disk) : '—' ],
+			[ t('Device size', '设备容量'), z.disk ? fmtBytes(z.disk) : '?' ],
 			[ t('Original data', '原始数据'), fmtBytes(mm[0]) ],
 			[ t('Compressed data', '压缩后数据'), fmtBytes(mm[1]) ],
 			[ t('RAM used', '占用内存'), fmtBytes(mm[2]) ],
 			[ t('Compression ratio', '压缩比'), ratio ],
 			[ t('Swap in use', '交换区使用'),
-			  z.swap ? '%s / %s'.format(fmtBytes(z.swap.used), fmtBytes(z.swap.size)) : '—' ]
+			  z.swap ? '%s / %s'.format(fmtBytes(z.swap.used), fmtBytes(z.swap.size)) : '?' ]
 		];
 
 		var table = E('table', { 'class': 'table' });

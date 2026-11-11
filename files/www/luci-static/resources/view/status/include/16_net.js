@@ -52,7 +52,7 @@ function sample() {
 
 function fmtRate(bps) {
 	if (bps == null || isNaN(bps))
-		return '—';
+		return '?';
 	if (bps >= 1e6)
 		return (bps / 1e6).toFixed(2) + '\xa0Mbit/s';
 	if (bps >= 1e3)
