@@ -66,7 +66,18 @@ fi
 rc=/etc/rc.local
 if [ -f "$rc" ] && ! grep -q 'qca-nss-netlink' "$rc"; then
     tmp="$rc.tmp"
-    sed '/^[[:space:]]*exit 0/d' "$rc" > "$tmp"
+    # Drop only the trailing "exit 0" (a last non-blank line that is one); an
+    # exit earlier in the file belongs to user commands and must survive.
+    awk '
+        /^[[:space:]]*exit 0[[:space:]]*$/ { last = NR }
+        { line[NR] = $0 }
+        END {
+            lastnb = NR
+            while (lastnb > 0 && line[lastnb] ~ /^[[:space:]]*$/) lastnb--
+            drop = (last && last == lastnb) ? last : 0
+            for (i = 1; i <= NR; i++) if (i != drop) print line[i]
+        }
+    ' "$rc" > "$tmp"
     cat >> "$tmp" <<'EOS'
 
 # Loaded here because kmodloader would do it too early (see the project docs).
