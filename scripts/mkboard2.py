@@ -76,6 +76,10 @@ def extract(src: Path):
     if not data.startswith(MAGIC):
         raise ValueError(f"{src}: bad board-2.bin magic")
     outer = list(parse_ies(data[MAGIC_LEN:]))
+    if len(outer) > 1:
+        raise ValueError(f"{src}: {len(outer)} board entries; only a single-entry "
+                         "board-2.bin is supported, extra entries would be "
+                         "silently dropped")
     name_id = data_id = payload = None
     for ident, body in outer:
         for iid, idata in parse_ies(body):
