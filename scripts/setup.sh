@@ -312,11 +312,14 @@ check() {
 }
 
 # A package that must NOT be selected: kconfig has a habit of silently
-# resolving conflicts by dropping the package we actually need.
+# resolving conflicts by dropping the package we actually need.  Match =m as
+# well as =y: a module build still proves the conflict was not resolved.
 forbid() {
     local bad=$1
-    if grep -qx "$bad" "$OW/.config"; then
-        say2file "  FORBIDDEN  $bad"
+    local hit
+    hit=$(grep -E "^${bad%=y}=[ym]$" "$OW/.config" || true)
+    if [ -n "$hit" ]; then
+        say2file "  FORBIDDEN  $hit"
         missing=1
     else
         say2file "  ok         not selected: $bad"
