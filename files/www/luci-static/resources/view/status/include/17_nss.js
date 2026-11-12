@@ -1,16 +1,16 @@
 'use strict';
 'require baseclass';
 'require fs';
+'require view.status.nss-i18n as i18n';
 
-/* 默认英语；界面语言为中文时显示中文 */
-var ZH = String(document.documentElement.lang || '').toLowerCase().indexOf('zh') === 0;
-function t(en, zh) { return ZH ? zh : en; }
+var t = i18n.t;
 
 function parseStats(text) {
 	var out = {};
 
 	(text || '').split('\n').forEach(function(line) {
 		var m = line.match(/^\s*([A-Za-z0-9_\[\]]+)\s*=\s*(\d+)/);
+
 		if (m && !(m[1] in out))
 			out[m[1]] = parseInt(m[2], 10);
 	});
@@ -61,7 +61,8 @@ function fmtRate(bps) {
 
 /* ipv4 统计文件：绝对计数与吞吐差分都要用 */
 function readIpv4() {
-	return L.resolveDefault(fs.read('/sys/kernel/debug/qca-nss-drv/stats/ipv4'), '').then(parseStats);
+	/* fs.trimmed() 不会 reject，读不到时返回空串 */
+	return fs.trimmed('/sys/kernel/debug/qca-nss-drv/stats/ipv4').then(parseStats);
 }
 
 /* ipv4 吞吐：两次采样差分；窗口异常或计数回退按无数据处理 */
@@ -81,12 +82,12 @@ function diffRates(old4, next4, ms) {
 	        rates.rx_bps < 0 || rates.tx_bps < 0) ? null : rates;
 }
 
-function build(r, next4, ms) {
+function build(r, old4, next4, ms) {
 	var status = r[0] || '';
-	/* 第二次采样失败时绝对计数退回首次采样：吞吐行按 '?' 显示，其余行保持 */
-	var ipv4 = (next4.ipv4_rx_pkts != null) ? next4 : r[3];
+	/* 后一次采样失败时绝对计数退回旧采样：吞吐行按 '?' 显示，其余行保持 */
+	var ipv4 = (next4.ipv4_rx_pkts != null) ? next4 : old4;
 	var ipv6 = parseStats(r[4]);
-	var rates = diffRates(r[3], next4, ms);
+	var rates = diffRates(old4, next4, ms);
 
 	/* "Min \t Avg \t Max" 一行三个百分比 */
 	var lm = (r[5] || '').match(/(\d+)\s*%\s+(\d+)\s*%\s+(\d+)\s*%/);
@@ -94,7 +95,7 @@ function build(r, next4, ms) {
 
 	var st = {};
 	status.split('\n').forEach(function(l) {
-		var m = l.match(/^\s+tx_redirect=(\d+).*rx_fw=(\d+)/);
+		var m = l.match(/^\s*tx_redirect=(\d+).*rx_fw=(\d+)/);
 		if (m) {
 			st.tx_redirect = parseInt(m[1], 10);
 			st.rx_fw = parseInt(m[2], 10);
@@ -121,27 +122,42 @@ function build(r, next4, ms) {
 	};
 }
 
-/* 官方卡片均为无状态设计：index.js 每个轮询周期都重新调用 load()，
- * render() 是 load() 数据的纯函数。吞吐由 ipv4 统计两次采样差分而来，
- * 因此把完整测量窗封闭在单次 load() 内，不保留任何跨周期基线——
- * 刷新、解除隐藏、跳页返回、后台切回，首帧均为当次实测的吞吐。 */
+/* 吞吐来自两次 ipv4 统计采样的差分。基线留在模块里：上一轮的计数直接
+ * 给下一轮当差分基准，load() 就不必再等一个测量窗——状态页每轮轮询
+ * 都 await 全部卡片的 load()（luci-mod-status 的 view/status/index.js），
+ * 在 load() 里等待会把整页刷新一起拖住。没有可用基线时（首帧、卡片
+ * 被隐藏过、后台挂起）退回一次短窗实测。 */
+var prev4 = null;
+var WINDOW = 1000;    /* 实测窗口，毫秒 */
+var MAX_GAP = 60000;  /* 基线超过这个间隔就作废，重新实测 */
+
 function measure() {
 	return Promise.all([
-		L.resolveDefault(fs.read('/sys/kernel/debug/qca-dwmac-nss/status'), ''),
-		L.resolveDefault(fs.read('/sys/kernel/debug/ecm/ecm_db/connection_count'), ''),
-		L.resolveDefault(fs.read('/sys/kernel/debug/ecm/ecm_nss_ipv4/accelerated_count'), ''),
+		fs.trimmed('/sys/kernel/debug/qca-dwmac-nss/status'),
+		fs.trimmed('/sys/kernel/debug/ecm/ecm_db/connection_count'),
+		fs.trimmed('/sys/kernel/debug/ecm/ecm_nss_ipv4/accelerated_count'),
 		readIpv4(),
-		L.resolveDefault(fs.read('/sys/kernel/debug/qca-nss-drv/stats/ipv6'), ''),
-		L.resolveDefault(fs.read('/sys/kernel/debug/qca-nss-drv/stats/cpu_load_ubi'), '')
+		fs.trimmed('/sys/kernel/debug/qca-nss-drv/stats/ipv6'),
+		fs.trimmed('/sys/kernel/debug/qca-nss-drv/stats/cpu_load_ubi')
 	]).then(function(r) {
-		var t0 = Date.now();
+		var now = Date.now();
+
+		if (prev4 && (now - prev4.ts) <= MAX_GAP) {
+			var res = build(r, prev4.data, r[3], now - prev4.ts);
+
+			prev4 = { ts: now, data: r[3] };
+
+			return res;
+		}
 
 		return new Promise(function(resolve) {
 			setTimeout(function() {
 				readIpv4().then(function(next4) {
-					resolve(build(r, next4, Date.now() - t0));
+					prev4 = { ts: Date.now(), data: next4 };
+
+					resolve(build(r, r[3], next4, Date.now() - now));
 				});
-			}, 1000);
+			}, WINDOW);
 		});
 	});
 }

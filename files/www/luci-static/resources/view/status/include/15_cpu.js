@@ -1,15 +1,14 @@
 'use strict';
 'require baseclass';
 'require fs';
+'require view.status.nss-i18n as i18n';
 
-/* 默认英语；界面语言为中文时显示中文 */
-var ZH = String(document.documentElement.lang || '').toLowerCase().indexOf('zh') === 0;
-function t(en, zh) { return ZH ? zh : en; }
+var t = i18n.t;
 
-function parseCpu(text) {
+function parseCpu(lines) {
 	var cpus = {};
 
-	(text || '').split('\n').forEach(function(line) {
+	lines.forEach(function(line) {
 		var m = line.match(/^(cpu\d*)\s+(.+)$/);
 
 		if (!m)
@@ -22,8 +21,8 @@ function parseCpu(text) {
 }
 
 function sample() {
-	/* fs.read 在 RPC 失败时会静默回退为空串，这里兜住剩余的 reject 路径 */
-	return L.resolveDefault(fs.read('/proc/stat'), '').then(parseCpu);
+	/* fs.lines() 逐行 trim，且不会 reject：读不到时返回空数组 */
+	return fs.lines('/proc/stat').then(parseCpu);
 }
 
 function usage(cur, old) {
@@ -60,23 +59,35 @@ function calcUsage(cur, old) {
 	return out;
 }
 
-/* 官方卡片均为无状态设计：index.js 每个轮询周期都重新调用 load()，
- * render() 是 load() 数据的纯函数。占用率由 /proc/stat 两次采样的
- * tick 增量差分而来，因此把完整测量窗封闭在单次 load() 内，不保留
- * 任何跨周期基线——刷新、解除隐藏、跳页返回、后台切回，首帧均为
- * 当次实测的占用率。窗口取 1.2 s：tickless idle 下短窗口可能没有
- * tick 增量。 */
+/* 占用率来自两次采样的 tick 增量差分。基线留在模块里：上一轮的累计
+ * 计数直接给下一轮当差分基准，load() 就不必再等一个测量窗——状态页
+ * 每轮轮询都 await 全部卡片的 load()（luci-mod-status 的
+ * view/status/index.js），在 load() 里等待会把整页刷新一起拖住。
+ * 没有可用基线时（首帧、卡片被隐藏过、后台挂起）退回一次短窗实测。 */
+var prev = null;
+var WINDOW = 1200;    /* 实测窗口，毫秒 */
+var MAX_GAP = 60000;  /* 基线超过这个间隔就作废，重新实测 */
+
 function measure() {
 	return sample().then(function(cur) {
+		var now = Date.now();
+
+		if (prev && (now - prev.ts) <= MAX_GAP) {
+			var res = { usage: calcUsage(cur, prev.data), empty: Object.keys(cur).length == 0 };
+
+			prev = { ts: now, data: cur };
+
+			return res;
+		}
+
 		return new Promise(function(resolve) {
 			setTimeout(function() {
 				sample().then(function(next) {
-					resolve({
-						usage: Object.keys(next).length > 0 ? calcUsage(next, cur) : {},
-						empty: Object.keys(next).length == 0
-					});
+					prev = { ts: Date.now(), data: next };
+
+					resolve({ usage: calcUsage(next, cur), empty: Object.keys(next).length == 0 });
 				});
-			}, 1200);
+			}, WINDOW);
 		});
 	});
 }

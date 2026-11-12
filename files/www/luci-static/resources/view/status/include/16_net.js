@@ -1,10 +1,9 @@
 'use strict';
 'require baseclass';
 'require rpc';
+'require view.status.nss-i18n as i18n';
 
-/* 默认英语；界面语言为中文时显示中文 */
-var ZH = String(document.documentElement.lang || '').toLowerCase().indexOf('zh') === 0;
-function t(en, zh) { return ZH ? zh : en; }
+var t = i18n.t;
 
 /* 通过 ubus network.device status 取接口统计 ——
  * 与官方“端口状态”卡片（29_ports.js）同款调用，NSS 卸载下可用；
@@ -50,16 +49,6 @@ function sample() {
 	});
 }
 
-function fmtRate(bps) {
-	if (bps == null || isNaN(bps))
-		return '?';
-	if (bps >= 1e6)
-		return (bps / 1e6).toFixed(2) + '\xa0Mbit/s';
-	if (bps >= 1e3)
-		return (bps / 1e3).toFixed(1) + '\xa0kbit/s';
-	return bps.toFixed(0) + '\xa0bit/s';
-}
-
 function diff(cur, next, millis) {
 	var out = {};
 
@@ -82,25 +71,47 @@ function diff(cur, next, millis) {
 	return out;
 }
 
-/* 官方卡片均为无状态设计：index.js 每个轮询周期都重新调用 load()，
- * render() 是 load() 数据的纯函数。速率必须由两次采样差分而来，
- * 因此把「采一次 → 等 1 s → 再采一次」的完整测量窗封闭在单次
- * load() 内，不保留任何跨周期基线——刷新、解除隐藏、跳页返回、
- * 后台切回，首帧均为当次实测的真实速率。 */
-function measure() {
-	var t0;
+/* 速率来自两次采样的字节计数差分。基线留在模块里：上一轮的计数直接
+ * 给下一轮当差分基准，load() 就不必再等一个测量窗——状态页每轮轮询
+ * 都 await 全部卡片的 load()（luci-mod-status 的 view/status/index.js），
+ * 在 load() 里等待会把整页刷新一起拖住。没有可用基线时（首帧、卡片
+ * 被隐藏过、后台挂起）退回一次短窗实测。 */
+var prev = null;
+var WINDOW = 1000;    /* 实测窗口，毫秒 */
+var MAX_GAP = 60000;  /* 基线超过这个间隔就作废，重新实测 */
 
+function measure() {
 	return sample().then(function(cur) {
-		t0 = Date.now();
+		var now = Date.now();
+
+		if (prev && (now - prev.ts) <= MAX_GAP) {
+			var res = { counters: cur, rates: diff(prev.data, cur, now - prev.ts) };
+
+			prev = { ts: now, data: cur };
+
+			return res;
+		}
 
 		return new Promise(function(resolve) {
 			setTimeout(function() {
 				sample().then(function(next) {
-					resolve({ counters: next, rates: diff(cur, next, Date.now() - t0) });
+					prev = { ts: Date.now(), data: next };
+
+					resolve({ counters: next, rates: diff(cur, next, Date.now() - now) });
 				});
-			}, 1000);
+			}, WINDOW);
 		});
 	});
+}
+
+function fmtRate(bps) {
+	if (bps == null || isNaN(bps))
+		return '?';
+	if (bps >= 1e6)
+		return (bps / 1e6).toFixed(2) + '\xa0Mbit/s';
+	if (bps >= 1e3)
+		return (bps / 1e3).toFixed(1) + '\xa0kbit/s';
+	return bps.toFixed(0) + '\xa0bit/s';
 }
 
 return baseclass.extend({
@@ -124,6 +135,10 @@ return baseclass.extend({
 		]));
 
 		IFACES.forEach(function(def) {
+			/* 设备上没有的接口不占行 */
+			if (!s.counters[def[0]])
+				return;
+
 			var r = s.rates ? s.rates[def[0]] : null;
 
 			table.appendChild(E('tr', { 'class': 'tr' }, [

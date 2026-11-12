@@ -1,10 +1,9 @@
 'use strict';
 'require baseclass';
 'require fs';
+'require view.status.nss-i18n as i18n';
 
-/* 默认英语；界面语言为中文时显示中文 */
-var ZH = String(document.documentElement.lang || '').toLowerCase().indexOf('zh') === 0;
-function t(en, zh) { return ZH ? zh : en; }
+var t = i18n.t;
 
 /* rpcd 的 ACL 按 realpath 匹配：/sys/class/thermal/*、/sys/class/hwmon/* 是
  * 符号链接，这里直接读 /sys/devices/... 的真实路径。
@@ -27,21 +26,22 @@ return baseclass.extend({
 	load: function() {
 		var tasks = [];
 
+		/* fs.trimmed() 读 /sys 的单值文件：不会 reject，读不到时返回空串 */
 		for (var i = 0; i < ZONES; i++) {
-			tasks.push(L.resolveDefault(fs.read(ZBASE + i + '/type'), ''));
-			tasks.push(L.resolveDefault(fs.read(ZBASE + i + '/temp'), ''));
+			tasks.push(fs.trimmed(ZBASE + i + '/type'));
+			tasks.push(fs.trimmed(ZBASE + i + '/temp'));
 		}
 
 		for (var h = 0; h < HWMONS.length; h++) {
-			tasks.push(L.resolveDefault(fs.read(HWMONS[h] + '/name'), ''));
-			tasks.push(L.resolveDefault(fs.read(HWMONS[h] + '/temp1_input'), ''));
+			tasks.push(fs.trimmed(HWMONS[h] + '/name'));
+			tasks.push(fs.trimmed(HWMONS[h] + '/temp1_input'));
 		}
 
 		return Promise.all(tasks).then(function(r) {
 			var list = [], wifi = 0;
 
 			for (var i = 0; i < ZONES; i++) {
-				var type = (r[i * 2] || '').trim();
+				var type = r[i * 2] || '';
 				var temp = parseInt(r[i * 2 + 1], 10);
 
 				if (type && !isNaN(temp))
@@ -49,7 +49,7 @@ return baseclass.extend({
 			}
 
 			for (var h = 0; h < HWMONS.length; h++) {
-				var name = (r[ZONES * 2 + h * 2] || '').trim();
+				var name = r[ZONES * 2 + h * 2] || '';
 				var t2 = parseInt(r[ZONES * 2 + h * 2 + 1], 10);
 
 				if (name === 'ath11k_hwmon' && !isNaN(t2))

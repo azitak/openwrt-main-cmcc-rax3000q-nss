@@ -1,10 +1,9 @@
 'use strict';
 'require baseclass';
 'require fs';
+'require view.status.nss-i18n as i18n';
 
-/* 默认英语；界面语言为中文时显示中文 */
-var ZH = String(document.documentElement.lang || '').toLowerCase().indexOf('zh') === 0;
-function t(en, zh) { return ZH ? zh : en; }
+var t = i18n.t;
 
 /* /sys/block/zram0 是符号链接，rpcd ACL 按 realpath 校验 */
 var BASE = '/sys/devices/virtual/block/zram0';
@@ -24,16 +23,18 @@ return baseclass.extend({
 	title: t('zram swap', 'zram 交换'),
 
 	load: function() {
+		/* fs.trimmed()/fs.lines() 读 /sys 与 /proc：不会 reject，
+		 * 读不到时分别是空串和空数组 */
 		return Promise.all([
-			L.resolveDefault(fs.read(BASE + '/disksize'), ''),
-			L.resolveDefault(fs.read(BASE + '/mm_stat'), ''),
-			L.resolveDefault(fs.read('/proc/swaps'), '')
+			fs.trimmed(BASE + '/disksize'),
+			fs.trimmed(BASE + '/mm_stat'),
+			fs.lines('/proc/swaps')
 		]).then(function(r) {
 			var disk = parseInt(r[0], 10);
-			var mm = (r[1] || '').trim().split(/\s+/).map(Number);
+			var mm = (r[1] || '').split(/\s+/).map(Number);
 			var swap = null;
 
-			(r[2] || '').split('\n').forEach(function(l) {
+			r[2].forEach(function(l) {
 				var m = l.match(/^\/dev\/zram0\s+\S+\s+(\d+)\s+(\d+)/);
 				if (m)
 					swap = { size: parseInt(m[1], 10) * 1024, used: parseInt(m[2], 10) * 1024 };
