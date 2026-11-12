@@ -14,7 +14,7 @@
 # This project changes six things:
 #   1. edits to files the baseline already ships  -> openwrt/0NNN-*.patch
 #      (board DTS + image.mk + caldata cases; libnftnl autoreconf for fullcone;
-#      kernel config trim)
+#      kernel config trim; qualcommax platform.sh single-slot sysupgrade)
 #   2. files the baseline does not have           -> openwrt/tree/, copied in
 #      (Dosilicon backport, BDF package, SONiC fullcone kernel/userspace patches)
 #   3. patches into the installed feeds           -> openwrt/feeds/, copied after
@@ -65,7 +65,8 @@ fi
 
 # ---------------------------------------------------------------- 1. tracked edits
 # 0001 = board (DTS, image.mk, caldata), 0002 = the libnftnl autoreconf hook
-# the SONiC fullcone patch needs, 0003 = kernel config trim (JFFS2, BPF).
+# the SONiC fullcone patch needs, 0003 = kernel config trim (JFFS2, BPF),
+# 0004 = single-slot sysupgrade for the RAX3000Q (qualcommax platform.sh).
 # More 0NNN- patches are picked up in order.
 say "Applying edits to baseline files"
 for PATCH in "$HERE"/openwrt/0[0-9][0-9][0-9]-*.patch; do
@@ -76,6 +77,21 @@ for PATCH in "$HERE"/openwrt/0[0-9][0-9][0-9]-*.patch; do
         run 600 git -C "$OW" apply --verbose "$PATCH"
     fi
 done
+
+# 0004 moves the RAX3000Q out of qualcommax's dual-slot upgrade group.  That
+# group flips between the "rootfs" and "rootfs_1" MTD partitions, which this
+# board does not have, and its failure path reboots the router mid-upgrade -
+# a web-UI sysupgrade then comes back unchanged.  The patched tree must
+# really carry the single-slot branch.
+PLAT="$OW/target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh"
+[ -f "$PLAT" ] || { echo "ERROR: $PLAT is missing"; exit 1; }
+if grep -Fq 'cmcc,rax3000q|\' "$PLAT"; then
+    echo "ERROR: $PLAT still routes cmcc,rax3000q through the dual-slot group"; exit 1;
+fi
+if ! sed -n '/cmcc,rax3000q)/,/;;/p' "$PLAT" | grep -F 'CI_UBIPART="rootfs"' >/dev/null; then
+    echo "ERROR: $PLAT has no single-slot sysupgrade branch for cmcc,rax3000q"; exit 1;
+fi
+echo "  sysupgrade ok: rax3000q flashes into the single rootfs slot"
 
 # ---------------------------------------------------------------- 2. new files
 say "Copying files the baseline does not have"

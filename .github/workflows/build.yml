@@ -113,7 +113,11 @@ jobs:
           grep -q 'nand-ecc-strength = <4>' "$DTS" || { echo "::error::wrong SPI-NAND ECC strength"; exit 1; }
           grep -q 'ubi.mtd=rootfs' "$DTS" || { echo "::error::missing ubi.mtd=rootfs"; exit 1; }
           grep -q 'ipq5018-nss.dtsi' "$DTS" || { echo "::error::the board has no NSS node"; exit 1; }
-          echo "Dosilicon driver, 4-bit ECC, UBI bootargs and the NSS node are in place"
+          PLAT=target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh
+          [ -f "$PLAT" ] || { echo "::error::missing $PLAT"; exit 1; }
+          if grep -Fq 'cmcc,rax3000q|\' "$PLAT"; then echo "::error::rax3000q still routed through the dual-slot sysupgrade group"; exit 1; fi
+          if ! sed -n '/cmcc,rax3000q)/,/;;/p' "$PLAT" | grep -F 'CI_UBIPART="rootfs"' >/dev/null; then echo "::error::rax3000q has no single-slot sysupgrade branch"; exit 1; fi
+          echo "Dosilicon driver, 4-bit ECC, UBI bootargs, NSS node and the single-slot sysupgrade branch are in place"
 
       - name: Compute the cache period key
         id: cacheperiod

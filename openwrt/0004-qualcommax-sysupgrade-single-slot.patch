@@ -1,0 +1,58 @@
+From: RAX3000Q NSS project
+Subject: [PATCH] qualcommax: sysupgrade into the RAX3000Q's single rootfs slot
+
+Upstream groups cmcc,rax3000q with cmcc,mr3000d-ci, cmcc,pz-l8 and the
+elecom/iodata boards. That branch assumes the Qualcomm A/B layout:
+elecom_upgrade_prepare reads the active rootfs slot from the bootconfig
+partition and smempart_next_root resolves the partition to write into,
+which needs a "rootfs_1" MTD partition.
+
+The RAX3000Q is single-slot: its flash ends at mtd15 "rootfs", one UBI
+holding kernel/rootfs/rootfs_data, and its bootconfig partition keeps the
+vendor's own layout. elecom_upgrade_prepare therefore fails, and its
+failure handling is nand_do_upgrade_failed, which umounts everything and
+force-reboots - so a web-UI sysupgrade restarted the router before a
+single byte was written and the old firmware came back.
+
+Give the board its own branch with the plain single-slot sequence the
+other non-A/B qualcommax boards use (zyxel,scr50axe and friends): drop
+leftover OEM UBI volumes, point CI_UBIPART at "rootfs" and let
+nand_do_upgrade flash the sysupgrade tar into the one slot.
+nand_upgrade_prepare_ubi recreates the volumes with a dummy
+"provisioning" volume in between, so kernel keeps volume id 0 and
+rootfs id 1 and the bootargs root=/dev/ubiblock0_1 keep matching the
+flashed slot.
+
+---
+ target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+--- a/target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh
++++ b/target/linux/qualcommax/ipq50xx/base-files/lib/upgrade/platform.sh
+@@ -419,7 +419,6 @@
+ 		;;
+ 	cmcc,mr3000d-ci|\
+ 	cmcc,pz-l8|\
+-	cmcc,rax3000q|\
+ 	elecom,wrc-x3000gs2|\
+ 	elecom,wrc-x3000gst2|\
+ 	iodata,wn-dax3000gr)
+@@ -433,6 +432,19 @@
+ 
+ 		remove_oem_ubi_volume bt_fw
+ 		remove_oem_ubi_volume ubi_rootfs
++		remove_oem_ubi_volume wifi_fw
++		nand_do_upgrade "$1"
++		;;
++	cmcc,rax3000q)
++		# The RAX3000Q has no A/B slots: its flash ends at the single
++		# "rootfs" MTD partition, one UBI holding kernel, rootfs and
++		# rootfs_data, and its bootconfig partition keeps the vendor's
++		# own layout. The dual-slot path above needs a rootfs_1
++		# partition, fails and reboots the router before anything is
++		# written, so use the plain single-slot sequence instead.
++		CI_UBIPART="rootfs"
++		remove_oem_ubi_volume ubi_rootfs
++		remove_oem_ubi_volume bt_fw
+ 		remove_oem_ubi_volume wifi_fw
+ 		nand_do_upgrade "$1"
+ 		;;
