@@ -11,8 +11,8 @@ Add fullcone NAT configuration to the firewall web interface:
 defaults.fullcone is a global gate: when off, all zone-level fullcone
 settings are ignored. When on, each zone must explicitly enable fullcone.
 ---
- htdocs/luci-static/resources/view/firewall/zones.js | 30 ++++++++++++++
- 1 file changed, 30 insertions(+)
+ htdocs/luci-static/resources/view/firewall/zones.js | 29 +++++++++++++
+ 1 file changed, 29 insertions(+)
 
 --- a/htdocs/luci-static/resources/view/firewall/zones.js
 +++ b/htdocs/luci-static/resources/view/firewall/zones.js
@@ -24,7 +24,7 @@ settings are ignored. When on, each zone must explicitly enable fullcone.
 +		o.default = '0';
 +		o.rmempty = true;
 +		o.optional = true;
- 
+
 @@ -179,6 +185,12 @@ return view.extend({
  			return null;
  		};
@@ -37,8 +37,8 @@ settings are ignored. When on, each zone must explicitly enable fullcone.
 +
  		o = s.taboption('general', form.Flag, 'mtu_fix', _('MSS clamping'));
  		o.modalonly = true;
- 
-@@ -281,6 +293,24 @@ return view.extend({
+
+@@ -281,6 +293,23 @@ return view.extend({
  		o.placeholder = '0.0.0.0/0';
  		o.modalonly = true;
  
@@ -58,8 +58,7 @@ settings are ignored. When on, each zone must explicitly enable fullcone.
 +		o.optional = true;
 +		o.placeholder = _('All of the above');
 +		o.display_size = 5;
-+		o.delimiter = ' ';
 +
  		o = s.taboption('conntrack', form.Flag, 'masq_allow_invalid', _('Allow "invalid" traffic'), _('Do not install extra rules to reject forwarded traffic with conntrack state <em>invalid</em>. This may be required for complex asymmetric route setups.'));
  		o.modalonly = true;
- 
+
